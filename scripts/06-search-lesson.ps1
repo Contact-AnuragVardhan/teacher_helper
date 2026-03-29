@@ -7,4 +7,4 @@ param(
 $encodedWhatsapp = [System.Uri]::EscapeDataString($WhatsappNumber)
 $encodedLessonName = [System.Uri]::EscapeDataString($LessonName)
 
-Invoke-RestMethod -Method Get "$BaseUrl/lesson/search?whatsapp_number=$encodedWhatsapp&lesson_name=$encodedLessonName" | ConvertTo-Json -Depth 10
+Invoke-RestMethod -Method Get "$BaseUrl/lesson/search?whatsapp_number=$encodedWhatsapp&lesson_name=$encodedLessonName"

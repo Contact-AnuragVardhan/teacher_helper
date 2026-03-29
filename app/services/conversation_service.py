@@ -1,15 +1,18 @@
 from dataclasses import dataclass
 
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core import messages
+from app.core.config import get_settings
+from app.core.logging import get_logger, log_event
 from app.repositories.lesson_repository import LessonRepository
 from app.repositories.session_repository import SessionRepository
 from app.repositories.teacher_repository import TeacherRepository
 from app.services.lesson_generator import LessonGeneratorService
 from app.state_machine.states import ConversationState
 from app.utils.text import clean_text, normalize_choice
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -21,15 +24,21 @@ class ConversationReply:
 class ConversationService:
     def __init__(self, db: Session):
         self.db = db
+        self.settings = get_settings()
         self.teacher_repo = TeacherRepository(db)
         self.lesson_repo = LessonRepository(db)
         self.session_repo = SessionRepository(db)
-        self.lesson_generator = LessonGeneratorService()
+        self.lesson_generator = LessonGeneratorService(db)
 
     def handle_message(self, whatsapp_number: str, incoming_text: str) -> ConversationReply:
-        session = self.session_repo.get_or_create(whatsapp_number)
+        session, was_reset = self.session_repo.get_or_create(whatsapp_number)
+        self.session_repo.touch(session)
+        if was_reset:
+            log_event(logger, "session_stale_reset", whatsapp_number=whatsapp_number)
+
         state = ConversationState(session.current_state)
         text = clean_text(incoming_text)
+        log_event(logger, "conversation_inbound", whatsapp_number=whatsapp_number, state=state.value, body=text)
 
         handler_map = {
             ConversationState.MAIN_MENU: self._handle_main_menu,
@@ -44,7 +53,15 @@ class ConversationService:
             ConversationState.RETRIEVE_LESSON_NAME: self._handle_retrieve_lesson_name,
         }
 
-        return handler_map[state](session, whatsapp_number, text)
+        result = handler_map[state](session, whatsapp_number, text)
+        log_event(
+            logger,
+            "conversation_transition",
+            whatsapp_number=whatsapp_number,
+            from_state=state.value,
+            to_state=result.current_state,
+        )
+        return result
 
     def _reply(self, reply: str, state: ConversationState) -> ConversationReply:
         return ConversationReply(reply=reply, current_state=state.value)
@@ -111,7 +128,8 @@ class ConversationService:
         return self._reply(messages.PROFILE_LANGUAGE_PROMPT, ConversationState.PROFILE_LANGUAGE)
 
     def _handle_profile_language(self, session, whatsapp_number: str, text: str) -> ConversationReply:
-        if normalize_choice(text) != "english":
+        if normalize_choice(text) not in self.settings.supported_languages_casefold:
+            log_event(logger, "validation_failure", field="preferred_language", value=text)
             return self._reply(messages.PROFILE_LANGUAGE_INVALID, ConversationState.PROFILE_LANGUAGE)
 
         self.teacher_repo.upsert(
@@ -119,7 +137,7 @@ class ConversationService:
             teacher_name=session.temp_profile_name or "",
             default_grade=session.temp_profile_grade or "",
             default_subject=session.temp_profile_subject or "",
-            preferred_language="English",
+            preferred_language=text.strip(),
         )
         self.session_repo.reset_for_main_menu(session)
         return self._reply(
@@ -129,6 +147,7 @@ class ConversationService:
 
     def _handle_new_lesson_topic(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         if not text:
+            log_event(logger, "validation_failure", field="topic", value=text)
             return self._reply(messages.NEW_LESSON_TOPIC_INVALID, ConversationState.NEW_LESSON_TOPIC)
 
         session.temp_topic = text
@@ -145,6 +164,7 @@ class ConversationService:
             if duration <= 0:
                 raise ValueError
         except (TypeError, ValueError):
+            log_event(logger, "validation_failure", field="duration_minutes", value=text)
             return self._reply(messages.INVALID_DURATION, ConversationState.NEW_LESSON_DURATION)
 
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
@@ -153,19 +173,19 @@ class ConversationService:
             self.session_repo.save(session)
             return self._reply(messages.NEW_LESSON_WITHOUT_PROFILE, ConversationState.PROFILE_NAME)
 
-        generated_lesson = self.lesson_generator.generate(
+        generation_result = self.lesson_generator.generate(
             teacher=teacher,
             topic=session.temp_topic or "",
             duration_minutes=duration,
         )
         session.temp_duration_minutes = duration
-        session.temp_generated_lesson = generated_lesson
+        session.temp_generated_lesson = generation_result.lesson_text
         session.current_state = ConversationState.NEW_LESSON_CONFIRM_SAVE.value
         self.session_repo.save(session)
 
         reply = (
             f"{messages.NEW_LESSON_SAVE_PROMPT_PREFIX}\n\n"
-            f"{generated_lesson}\n\n"
+            f"{generation_result.lesson_text}\n\n"
             f"{messages.SAVE_MENU}"
         )
         return self._reply(reply, ConversationState.NEW_LESSON_CONFIRM_SAVE)
@@ -188,6 +208,7 @@ class ConversationService:
 
     def _handle_new_lesson_name(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         if not text:
+            log_event(logger, "validation_failure", field="lesson_name", value=text)
             return self._reply(messages.NEW_LESSON_NAME_INVALID, ConversationState.NEW_LESSON_NAME)
 
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
@@ -196,21 +217,16 @@ class ConversationService:
             self.session_repo.save(session)
             return self._reply(messages.NEW_LESSON_WITHOUT_PROFILE, ConversationState.PROFILE_NAME)
 
-        existing = self.lesson_repo.get_by_teacher_and_name(teacher.id, text)
-        if existing:
-            return self._reply(messages.DUPLICATE_LESSON_NAME, ConversationState.NEW_LESSON_NAME)
-
-        try:
-            self.lesson_repo.create(
-                teacher_id=teacher.id,
-                lesson_name=text,
-                topic=session.temp_topic or "",
-                grade=teacher.default_grade,
-                subject=teacher.default_subject,
-                duration_minutes=session.temp_duration_minutes or 0,
-                lesson_text=session.temp_generated_lesson or "",
-            )
-        except IntegrityError:
+        lesson = self.lesson_repo.create_or_update_by_policy(
+            teacher_id=teacher.id,
+            lesson_name=text,
+            topic=session.temp_topic or "",
+            grade=teacher.default_grade,
+            subject=teacher.default_subject,
+            duration_minutes=session.temp_duration_minutes or 0,
+            lesson_text=session.temp_generated_lesson or "",
+        )
+        if lesson is None:
             return self._reply(messages.DUPLICATE_LESSON_NAME, ConversationState.NEW_LESSON_NAME)
 
         self.session_repo.reset_for_main_menu(session)
@@ -220,6 +236,11 @@ class ConversationService:
         )
 
     def _handle_retrieve_lesson_name(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        choice = normalize_choice(text)
+        if choice in {"0", "menu", "main menu", "back"}:
+            self.session_repo.reset_for_main_menu(session)
+            return self._reply(messages.MAIN_MENU, ConversationState.MAIN_MENU)
+
         if not text:
             return self._reply(
                 messages.RETRIEVE_LESSON_NAME_INVALID,
@@ -236,7 +257,10 @@ class ConversationService:
 
         lesson = self.lesson_repo.get_by_teacher_and_name(teacher.id, text)
         if not lesson:
-            return self._reply(messages.LESSON_NOT_FOUND, ConversationState.RETRIEVE_LESSON_NAME)
+            return self._reply(
+                f"{messages.LESSON_NOT_FOUND}\n{messages.LESSON_LOOKUP_EXIT_HINT}",
+                ConversationState.RETRIEVE_LESSON_NAME,
+            )
 
         self.session_repo.reset_for_main_menu(session)
         reply = f"{lesson.lesson_text}\n\n{messages.MAIN_MENU}"

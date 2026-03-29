@@ -1,3 +1,5 @@
+from datetime import datetime, timedelta
+
 from app.core.messages import (
     DUPLICATE_LESSON_NAME,
     INVALID_DURATION,
@@ -69,7 +71,7 @@ def test_new_lesson_without_profile_redirects_correctly(client):
     assert "Please complete your profile first." in payload["reply"]
 
 
-def test_successful_lesson_generation(client):
+def test_successful_lesson_generation(client, db_session):
     create_profile_via_webhook(client)
     response = generate_lesson_until_save_prompt(client)
     payload = response.json()
@@ -150,7 +152,8 @@ def test_retrieve_missing_lesson_returns_correct_message(client):
 
     assert response.status_code == 200
     assert payload["current_state"] == "RETRIEVE_LESSON_NAME"
-    assert payload["reply"] == LESSON_NOT_FOUND
+    assert LESSON_NOT_FOUND in payload["reply"]
+    assert "send 0 to return to the main menu" in payload["reply"].lower()
 
 
 def test_duplicate_lesson_name_rejection(client):
@@ -179,3 +182,53 @@ def test_invalid_main_menu_input(client):
     assert payload["current_state"] == "MAIN_MENU"
     assert payload["reply"].startswith("I did not understand that.")
     assert MAIN_MENU in payload["reply"]
+
+
+def test_duplicate_lesson_name_overwrite_mode(client, db_session, monkeypatch):
+    monkeypatch.setenv("DUPLICATE_LESSON_POLICY", "overwrite")
+    create_profile_via_webhook(client)
+    generate_lesson_until_save_prompt(client)
+    send(client, "1")
+    send(client, "Plants Basics")
+
+    send(client, "1")
+    send(client, "Roots and Stems")
+    send(client, "35")
+    send(client, "1")
+    response = send(client, "Plants Basics")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["current_state"] == "MAIN_MENU"
+    lesson = db_session.query(LessonPlan).filter_by(lesson_name="Plants Basics").one()
+    assert lesson.topic == "Roots and Stems"
+
+
+def test_session_expiry_reset(client, db_session, monkeypatch):
+    monkeypatch.setenv("SESSION_TIMEOUT_MINUTES", "1")
+    create_profile_via_webhook(client)
+    send(client, "1")
+    send(client, "Plants")
+
+    session = db_session.query(SessionState).filter_by(whatsapp_number=PHONE).one()
+    session.updated_at = datetime.utcnow() - timedelta(minutes=10)
+    db_session.add(session)
+    db_session.commit()
+
+    response = send(client, "hello after timeout")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["current_state"] == "MAIN_MENU"
+    assert payload["reply"].startswith("I did not understand that.")
+
+def test_retrieve_missing_lesson_allows_exit_to_main_menu(client, db_session):
+    create_profile_via_webhook(client)
+    send(client, "2")
+    send(client, "Unknown Lesson")
+    response = send(client, "0")
+    payload = response.json()
+
+    assert response.status_code == 200
+    assert payload["current_state"] == "MAIN_MENU"
+    assert payload["reply"] == MAIN_MENU

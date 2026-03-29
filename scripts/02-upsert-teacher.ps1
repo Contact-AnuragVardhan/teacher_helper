@@ -15,4 +15,4 @@ $body = @{
     preferred_language = $PreferredLanguage
 } | ConvertTo-Json
 
-Invoke-RestMethod -Method Post "$BaseUrl/teacher" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 10
+Invoke-RestMethod -Method Post "$BaseUrl/teacher" -ContentType "application/json" -Body $body

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LessonGenerateRequest(BaseModel):
@@ -11,6 +11,8 @@ class LessonGenerateRequest(BaseModel):
 
 class LessonGenerateResponse(BaseModel):
     lesson_text: str
+    provider_used: str | None = None
+    retrieved_sources: list[str] = Field(default_factory=list)
 
 
 class LessonSaveRequest(BaseModel):

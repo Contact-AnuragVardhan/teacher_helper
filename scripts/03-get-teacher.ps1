@@ -3,4 +3,6 @@ param(
     [string]$WhatsappNumber = "+15550001111"
 )
 
-Invoke-RestMethod -Method Get "$BaseUrl/teacher/$WhatsappNumber" | ConvertTo-Json -Depth 10
+$encodedWhatsapp = [System.Uri]::EscapeDataString($WhatsappNumber)
+
+Invoke-RestMethod -Method Get "$BaseUrl/teacher/$encodedWhatsapp"

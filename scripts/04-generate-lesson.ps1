@@ -11,4 +11,4 @@ $body = @{
     duration_minutes = $DurationMinutes
 } | ConvertTo-Json
 
-Invoke-RestMethod -Method Post "$BaseUrl/lesson/generate" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 10
+Invoke-RestMethod -Method Post "$BaseUrl/lesson/generate" -ContentType "application/json" -Body $body

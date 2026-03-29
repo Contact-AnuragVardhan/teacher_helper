@@ -1,38 +1,92 @@
+from dataclasses import dataclass
+
+from sqlalchemy.orm import Session
+
+from app.core.config import Settings, get_settings
+from app.core.logging import get_logger, log_event
 from app.models.teacher_profile import TeacherProfile
+from app.services.deterministic_provider import DeterministicTemplateProvider
+from app.services.lesson_generation_provider import LessonGenerationProvider
+from app.services.llm_provider_openai import OpenAILessonGenerationProvider
+from app.services.ncert_retrieval_service import NcertRetrievalService
+from app.services.prompt_builder import PromptBuilder, PromptBuilderInput
+
+logger = get_logger(__name__)
+
+
+@dataclass(slots=True)
+class LessonGenerationResult:
+    lesson_text: str
+    provider_used: str
+    retrieved_sources: list[str]
 
 
 class LessonGeneratorService:
-    SAMPLE_NCERT_CONTEXT = (
-        "Sample NCERT-aligned context: start from familiar examples, explain one core idea "
-        "clearly, add one short activity, and end with quick questions to check understanding."
-    )
+    def __init__(
+        self,
+        db: Session,
+        settings: Settings | None = None,
+        retrieval_service: NcertRetrievalService | None = None,
+        prompt_builder: PromptBuilder | None = None,
+        deterministic_provider: LessonGenerationProvider | None = None,
+        openai_provider: LessonGenerationProvider | None = None,
+    ):
+        self.db = db
+        self.settings = settings or get_settings()
+        self.retrieval_service = retrieval_service or NcertRetrievalService(db)
+        self.prompt_builder = prompt_builder or PromptBuilder()
+        self.deterministic_provider = deterministic_provider or DeterministicTemplateProvider()
+        self.openai_provider = openai_provider
 
-    def generate(self, teacher: TeacherProfile, topic: str, duration_minutes: int) -> str:
-        opening = max(3, duration_minutes // 6)
-        main_teaching = max(10, duration_minutes // 2)
-        activity = max(5, duration_minutes // 5)
-        qa = max(4, duration_minutes // 8)
-        used = opening + main_teaching + activity + qa
-        closing = max(2, duration_minutes - used)
-
-        lesson_title = f"{topic.strip().title()}"
-
-        return (
-            f"Lesson Title\n"
-            f"{lesson_title}\n\n"
-            f"Objective\n"
-            f"Students will understand the basic idea of {topic.strip()} in {teacher.default_subject}.\n\n"
-            f"Opening\n"
-            f"({opening} min) Begin with a simple question linked to students' prior knowledge about {topic.strip()}.\n\n"
-            f"Main Teaching\n"
-            f"({main_teaching} min) Explain the key idea of {topic.strip()} step by step using clear examples for Grade {teacher.default_grade}.\n\n"
-            f"Activity\n"
-            f"({activity} min) Ask students to do one short classroom activity related to {topic.strip()} with a partner or notebook.\n\n"
-            f"Q&A\n"
-            f"({qa} min) Ask 2-3 quick checking questions and let students answer in their own words.\n\n"
-            f"Closing\n"
-            f"({closing} min) Summarize the lesson and connect it to the next class.\n\n"
-            f"Teacher Notes\n"
-            f"Language: {teacher.preferred_language}\n"
-            f"Reference: {self.SAMPLE_NCERT_CONTEXT}"
+    def generate(self, *, teacher: TeacherProfile, topic: str, duration_minutes: int) -> LessonGenerationResult:
+        retrieved_chunks = self.retrieval_service.retrieve(
+            grade=teacher.default_grade,
+            subject=teacher.default_subject,
+            topic=topic,
         )
+        snippet_texts = [item.as_prompt_snippet() for item in retrieved_chunks]
+        prompt = self.prompt_builder.build(
+            PromptBuilderInput(
+                grade=teacher.default_grade,
+                subject=teacher.default_subject,
+                preferred_language=teacher.preferred_language,
+                topic=topic,
+                duration_minutes=duration_minutes,
+                retrieved_snippets=snippet_texts,
+            )
+        )
+
+        try:
+            provider = self._primary_provider()
+            lesson_text = provider.generate(prompt)
+            provider_used = provider.provider_name
+        except Exception as exc:
+            requested_provider = getattr(locals().get("provider"), "provider_name", self.settings.llm_provider)
+            log_event(
+                logger,
+                "lesson_generation_fallback",
+                requested_provider=requested_provider,
+                error=str(exc),
+            )
+            lesson_text = self.deterministic_provider.generate(prompt)
+            provider_used = self.deterministic_provider.provider_name
+
+        log_event(
+            logger,
+            "lesson_generation_complete",
+            provider_used=provider_used,
+            retrieval_count=len(retrieved_chunks),
+            retrieved_sources=[item.source_title for item in retrieved_chunks],
+        )
+        return LessonGenerationResult(
+            lesson_text=lesson_text,
+            provider_used=provider_used,
+            retrieved_sources=[item.source_title for item in retrieved_chunks],
+        )
+
+    def _primary_provider(self) -> LessonGenerationProvider:
+        if self.settings.llm_provider == "openai":
+            if self.openai_provider is not None:
+                return self.openai_provider
+            return OpenAILessonGenerationProvider(self.settings)
+        return self.deterministic_provider

@@ -1,5 +1,4 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -26,12 +25,17 @@ def generate_lesson(payload: LessonGenerateRequest, db: Session = Depends(get_db
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="duration_minutes must be greater than 0.",
         )
-    lesson_text = LessonGeneratorService().generate(
+
+    result = LessonGeneratorService(db).generate(
         teacher=teacher,
         topic=payload.topic.strip(),
         duration_minutes=payload.duration_minutes,
     )
-    return LessonGenerateResponse(lesson_text=lesson_text)
+    return LessonGenerateResponse(
+        lesson_text=result.lesson_text,
+        provider_used=result.provider_used,
+        retrieved_sources=result.retrieved_sources,
+    )
 
 
 @router.post("/save", response_model=LessonResponse)
@@ -44,28 +48,20 @@ def save_lesson(payload: LessonSaveRequest, db: Session = Depends(get_db)) -> Le
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="lesson_name cannot be blank.")
 
     repo = LessonRepository(db)
-    if repo.get_by_teacher_and_name(teacher.id, payload.lesson_name):
+    lesson = repo.create_or_update_by_policy(
+        teacher_id=teacher.id,
+        lesson_name=payload.lesson_name,
+        topic=payload.topic,
+        grade=teacher.default_grade,
+        subject=teacher.default_subject,
+        duration_minutes=payload.duration_minutes,
+        lesson_text=payload.lesson_text,
+    )
+    if lesson is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A lesson with this name already exists.",
         )
-
-    try:
-        lesson = repo.create(
-            teacher_id=teacher.id,
-            lesson_name=payload.lesson_name,
-            topic=payload.topic,
-            grade=teacher.default_grade,
-            subject=teacher.default_subject,
-            duration_minutes=payload.duration_minutes,
-            lesson_text=payload.lesson_text,
-        )
-    except IntegrityError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="A lesson with this name already exists.",
-        ) from None
-
     return lesson
 
 

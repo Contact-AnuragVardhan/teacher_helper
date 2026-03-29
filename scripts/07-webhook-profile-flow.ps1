@@ -7,6 +7,19 @@ param(
     [string]$PreferredLanguage = "English"
 )
 
+function Send-WebhookMessage {
+    param(
+        [string]$Message
+    )
+
+    $body = @{
+        from = $From
+        body = $Message
+    } | ConvertTo-Json
+
+    Invoke-RestMethod -Method Post "$BaseUrl/webhook/whatsapp" -ContentType "application/json" -Body $body
+}
+
 $messages = @(
     "3",
     $TeacherName,
@@ -16,10 +29,8 @@ $messages = @(
 )
 
 foreach ($message in $messages) {
-    $body = @{
-        from = $From
-        body = $message
-    } | ConvertTo-Json
-
-    Invoke-RestMethod -Method Post "$BaseUrl/webhook/whatsapp" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 10
+    [pscustomobject]@{
+        sent = $message
+        response = Send-WebhookMessage -Message $message
+    }
 }

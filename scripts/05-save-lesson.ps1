@@ -15,4 +15,4 @@ $body = @{
     lesson_text = $LessonText
 } | ConvertTo-Json
 
-Invoke-RestMethod -Method Post "$BaseUrl/lesson/save" -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 10
+Invoke-RestMethod -Method Post "$BaseUrl/lesson/save" -ContentType "application/json" -Body $body

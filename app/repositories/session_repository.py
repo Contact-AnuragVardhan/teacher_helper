@@ -1,5 +1,8 @@
+from datetime import datetime, timedelta
+
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models.session_state import SessionState
 from app.state_machine.states import ConversationState
 
@@ -7,30 +10,43 @@ from app.state_machine.states import ConversationState
 class SessionRepository:
     def __init__(self, db: Session):
         self.db = db
+        self.settings = get_settings()
 
-    def get_or_create(self, whatsapp_number: str) -> SessionState:
+    def get_or_create(self, whatsapp_number: str) -> tuple[SessionState, bool]:
         session = (
             self.db.query(SessionState)
             .filter(SessionState.whatsapp_number == whatsapp_number)
             .first()
         )
-        if session:
-            return session
+        if session is None:
+            session = SessionState(
+                whatsapp_number=whatsapp_number,
+                current_state=ConversationState.MAIN_MENU.value,
+            )
+            self.db.add(session)
+            self.db.commit()
+            self.db.refresh(session)
+            return session, False
 
-        session = SessionState(
-            whatsapp_number=whatsapp_number,
-            current_state=ConversationState.MAIN_MENU.value,
-        )
-        self.db.add(session)
-        self.db.commit()
-        self.db.refresh(session)
-        return session
+        was_reset = False
+        if self.is_stale(session):
+            self.reset_for_main_menu(session)
+            was_reset = True
+        return session, was_reset
+
+    def is_stale(self, session: SessionState) -> bool:
+        timeout = timedelta(minutes=self.settings.session_timeout_minutes)
+        return datetime.utcnow() - session.updated_at > timeout
 
     def save(self, session: SessionState) -> SessionState:
         self.db.add(session)
         self.db.commit()
         self.db.refresh(session)
         return session
+
+    def touch(self, session: SessionState) -> SessionState:
+        session.updated_at = datetime.utcnow()
+        return self.save(session)
 
     def set_state(self, session: SessionState, state: ConversationState) -> SessionState:
         session.current_state = state.value
@@ -58,4 +74,5 @@ class SessionRepository:
         session.temp_profile_name = None
         session.temp_profile_grade = None
         session.temp_profile_subject = None
+        session.updated_at = datetime.utcnow()
         return self.save(session)

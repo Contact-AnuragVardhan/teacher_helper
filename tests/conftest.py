@@ -7,6 +7,11 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+os.environ.setdefault("DATABASE_URL", "sqlite://")
+os.environ.setdefault("LLM_PROVIDER", "deterministic")
+os.environ.setdefault("DUPLICATE_LESSON_POLICY", "reject")
+os.environ.setdefault("SESSION_TIMEOUT_MINUTES", "30")
+os.environ.setdefault("SUPPORTED_LANGUAGES", "English")
 
 import pytest
 from fastapi.testclient import TestClient
@@ -14,11 +19,17 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-os.environ["DATABASE_URL"] = "sqlite://"
-
+from app.core.config import get_settings
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+
+
+@pytest.fixture(autouse=True)
+def clear_settings_cache():
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture()

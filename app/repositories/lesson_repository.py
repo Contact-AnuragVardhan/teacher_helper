@@ -2,6 +2,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.models.lesson_plan import LessonPlan
 
 
@@ -48,3 +49,58 @@ class LessonRepository:
             raise
         self.db.refresh(lesson)
         return lesson
+
+    def overwrite(
+        self,
+        lesson: LessonPlan,
+        *,
+        topic: str,
+        grade: str,
+        subject: str,
+        duration_minutes: int,
+        lesson_text: str,
+    ) -> LessonPlan:
+        lesson.topic = topic.strip()
+        lesson.grade = grade.strip()
+        lesson.subject = subject.strip()
+        lesson.duration_minutes = duration_minutes
+        lesson.lesson_text = lesson_text
+        self.db.add(lesson)
+        self.db.commit()
+        self.db.refresh(lesson)
+        return lesson
+
+    def create_or_update_by_policy(
+        self,
+        *,
+        teacher_id: int,
+        lesson_name: str,
+        topic: str,
+        grade: str,
+        subject: str,
+        duration_minutes: int,
+        lesson_text: str,
+    ) -> LessonPlan | None:
+        settings = get_settings()
+        existing = self.get_by_teacher_and_name(teacher_id, lesson_name)
+        if existing:
+            if settings.duplicate_lesson_policy == "reject":
+                return None
+            return self.overwrite(
+                existing,
+                topic=topic,
+                grade=grade,
+                subject=subject,
+                duration_minutes=duration_minutes,
+                lesson_text=lesson_text,
+            )
+
+        return self.create(
+            teacher_id=teacher_id,
+            lesson_name=lesson_name,
+            topic=topic,
+            grade=grade,
+            subject=subject,
+            duration_minutes=duration_minutes,
+            lesson_text=lesson_text,
+        )
