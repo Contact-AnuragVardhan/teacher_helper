@@ -15,6 +15,16 @@ class Settings(BaseSettings):
     duplicate_lesson_policy: Literal["reject", "overwrite"] = Field(default="reject", validation_alias=AliasChoices("duplicate_lesson_policy", "DUPLICATE_LESSON_POLICY"))
     session_timeout_minutes: int = Field(default=30, validation_alias=AliasChoices("session_timeout_minutes", "SESSION_TIMEOUT_MINUTES"))
     supported_languages: str = Field(default="English", validation_alias=AliasChoices("supported_languages", "SUPPORTED_LANGUAGES"))
+
+    profile_allowed_grades: str = Field(
+        default="",
+        validation_alias=AliasChoices("profile_allowed_grades", "PROFILE_ALLOWED_GRADES"),
+    )
+    profile_allowed_subjects_by_grade: str = Field(
+        default="",
+        validation_alias=AliasChoices("profile_allowed_subjects_by_grade", "PROFILE_ALLOWED_SUBJECTS_BY_GRADE"),
+    )
+
     log_level: str = Field(default="INFO", validation_alias=AliasChoices("log_level", "LOG_LEVEL"))
     allow_origins: str = Field(default="http://localhost:5173", validation_alias=AliasChoices("allow_origins", "ALLOW_ORIGINS"))
     ncert_chunk_size: int = Field(default=650, validation_alias=AliasChoices("ncert_chunk_size", "NCERT_CHUNK_SIZE"))
@@ -52,6 +62,41 @@ class Settings(BaseSettings):
     @property
     def supported_languages_casefold(self) -> set[str]:
         return {item.casefold() for item in self.supported_languages_list}
+
+    @property
+    def profile_allowed_grades_list(self) -> list[str]:
+        return [item.strip() for item in self.profile_allowed_grades.split(",") if item.strip()]
+
+    @property
+    def profile_allowed_grades_casefold(self) -> set[str]:
+        return {item.casefold() for item in self.profile_allowed_grades_list}
+
+    @property
+    def profile_allowed_subjects_by_grade_map(self) -> dict[str, list[str]]:
+        result: dict[str, list[str]] = {}
+        raw = self.profile_allowed_subjects_by_grade.strip()
+        if not raw:
+            return result
+
+        for entry in raw.split(";"):
+            entry = entry.strip()
+            if not entry or ":" not in entry:
+                continue
+
+            grade, subjects_raw = entry.split(":", 1)
+            grade = grade.strip()
+            subjects = [item.strip() for item in subjects_raw.split("|") if item.strip()]
+            if grade and subjects:
+                result[grade] = subjects
+
+        return result
+
+    @property
+    def profile_allowed_subjects_by_grade_casefold(self) -> dict[str, set[str]]:
+        return {
+            grade.casefold(): {subject.casefold() for subject in subjects}
+            for grade, subjects in self.profile_allowed_subjects_by_grade_map.items()
+        }
 
     @property
     def allow_origins_list(self) -> list[str]:

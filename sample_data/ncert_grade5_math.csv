@@ -1,3 +1,2 @@
-grade,subject,chapter,topic,source_title,content,keywords
-5,Math,Fractions,Fractions,NCERT Math Grade 5 - Fractions,"A fraction shows part of a whole. Fractions can be represented using shapes, number lines, and equal sharing situations.","fractions, whole, part, number line"
-5,Math,Fractions,Equivalent Fractions,NCERT Math Grade 5 - Fractions,"Equivalent fractions name the same quantity even if the numbers look different. Students can compare them with shaded shapes.","equivalent fractions, compare fractions"
+grade,subject,book,book_url,unit_name,topic_name,topic_summary,lesson_goal,source_reference,chapter,topic,source_title,content,keywords
+5,Math,Math-Magic,https://ncert.nic.in/textbook.php,Unit 1,Fractions,Students learn parts of a whole and simple fraction ideas,Build basic understanding of fractions,NCERT Grade 5 Math syllabus,Unit 1,Fractions,NCERT Grade 5 Math,"Fractions represent equal parts of a whole...",fractions, numerator, denominator

@@ -21,10 +21,14 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    log_event(logger, "app_startup", reset_db_on_start=settings.reset_db_on_start)
     if settings.reset_db_on_start:
+        log_event(logger, "database_reset_requested")
         Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    log_event(logger, "database_ready")
     yield
+    log_event(logger, "app_shutdown")
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -62,4 +66,5 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 @app.get("/health")
 def health() -> dict[str, str]:
+    log_event(logger, "health_check")
     return {"status": "ok"}

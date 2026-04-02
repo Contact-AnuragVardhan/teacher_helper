@@ -19,6 +19,7 @@ class LessonGenerationResult:
     lesson_text: str
     provider_used: str
     retrieved_sources: list[str]
+    matched_syllabus_rows: list[dict]
 
 
 class LessonGeneratorService:
@@ -39,12 +40,22 @@ class LessonGeneratorService:
         self.openai_provider = openai_provider
 
     def generate(self, *, teacher: TeacherProfile, topic: str, duration_minutes: int) -> LessonGenerationResult:
+        log_event(
+            logger,
+            "lesson_generation_started",
+            teacher_id=teacher.id,
+            topic=topic,
+            duration_minutes=duration_minutes,
+            preferred_language=teacher.preferred_language,
+        )
         retrieved_chunks = self.retrieval_service.retrieve(
             grade=teacher.default_grade,
             subject=teacher.default_subject,
             topic=topic,
         )
         snippet_texts = [item.as_prompt_snippet() for item in retrieved_chunks]
+        inspectable_rows = [item.as_inspectable_row() for item in retrieved_chunks]
+
         prompt = self.prompt_builder.build(
             PromptBuilderInput(
                 grade=teacher.default_grade,
@@ -58,6 +69,7 @@ class LessonGeneratorService:
 
         try:
             provider = self._primary_provider()
+            log_event(logger, "lesson_generation_provider_selected", provider=provider.provider_name)
             lesson_text = provider.generate(prompt)
             provider_used = provider.provider_name
         except Exception as exc:
@@ -82,11 +94,15 @@ class LessonGeneratorService:
             lesson_text=lesson_text,
             provider_used=provider_used,
             retrieved_sources=[item.source_title for item in retrieved_chunks],
+            matched_syllabus_rows=inspectable_rows,
         )
 
     def _primary_provider(self) -> LessonGenerationProvider:
         if self.settings.llm_provider == "openai":
             if self.openai_provider is not None:
+                log_event(logger, "lesson_generation_provider_reused", provider="openai")
                 return self.openai_provider
+            log_event(logger, "lesson_generation_provider_initialized", provider="openai")
             return OpenAILessonGenerationProvider(self.settings)
+        log_event(logger, "lesson_generation_provider_initialized", provider=self.deterministic_provider.provider_name)
         return self.deterministic_provider

@@ -1,12 +1,16 @@
 import re
 
+from app.core.logging import get_logger, log_event
 from app.services.lesson_generation_provider import LessonGenerationProvider, PromptBundle
+
+logger = get_logger(__name__)
 
 
 class DeterministicTemplateProvider(LessonGenerationProvider):
     provider_name = "deterministic"
 
     def generate(self, prompt: PromptBundle) -> str:
+        log_event(logger, "deterministic_generation_started", topic=prompt.metadata.get("topic"))
         topic = str(prompt.metadata.get("topic", "Lesson")).strip()
         grade = str(prompt.metadata.get("grade", "the class")).strip()
         subject = str(prompt.metadata.get("subject", "the subject")).strip()

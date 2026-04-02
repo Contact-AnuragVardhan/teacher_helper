@@ -2,19 +2,33 @@
   {
     "grade": "5",
     "subject": "Science",
+    "book": "Looking Around",
+    "book_url": "https://ncert.nic.in/textbook.php",
+    "unit_name": "Plants Around Us",
+    "topic_name": "Plants",
+    "topic_summary": "Students learn that plants make food in their leaves and that roots, stems, and leaves perform different jobs to help the plant live and grow.",
+    "lesson_goal": "Help students identify the basic functions of roots, stems, and leaves and connect plant parts to everyday observation.",
+    "source_reference": "NCERT Grade 5 Science syllabus/topic map",
+    "source_title": "NCERT EVS Grade 5 - Plants Around Us",
     "chapter": "Plants Around Us",
     "topic": "Plants",
-    "source_title": "NCERT EVS Grade 5 - Plants Around Us",
     "content": "Plants make food in their leaves using sunlight, air, and water. Different parts of a plant perform different jobs. Roots hold the plant and absorb water. Stems support the plant. Leaves help prepare food.",
-    "keywords": "plants, leaves, roots, stems, sunlight"
+    "keywords": "plants, leaves, roots, stems, sunlight, plant parts"
   },
   {
     "grade": "5",
     "subject": "Science",
+    "book": "Looking Around",
+    "book_url": "https://ncert.nic.in/textbook.php",
+    "unit_name": "Living Things",
+    "topic_name": "Plant needs",
+    "topic_summary": "Students explore what plants need in order to grow well, including air, water, sunlight, and space.",
+    "lesson_goal": "Help students connect plant growth to basic needs and encourage simple observation-based classroom activities.",
+    "source_reference": "NCERT Grade 5 Science syllabus/topic map",
+    "source_title": "NCERT EVS Grade 5 - Living Things",
     "chapter": "Living Things",
     "topic": "Plant needs",
-    "source_title": "NCERT EVS Grade 5 - Living Things",
     "content": "Plants need air, water, sunlight, and space to grow well. Children can observe how a plant changes over time by watering it regularly and placing it where it gets light.",
-    "keywords": "plants, growth, water, sunlight"
+    "keywords": "plants, growth, water, sunlight, air, space"
   }
 ]

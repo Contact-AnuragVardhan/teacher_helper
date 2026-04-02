@@ -10,6 +10,7 @@ from app.repositories.session_repository import SessionRepository
 from app.repositories.teacher_repository import TeacherRepository
 from app.services.lesson_generator import LessonGeneratorService
 from app.state_machine.states import ConversationState
+from app.utils.profile_validation import validate_profile_grade, validate_profile_subject
 from app.utils.text import clean_text, normalize_choice
 
 logger = get_logger(__name__)
@@ -113,7 +114,15 @@ class ConversationService:
         if not text:
             return self._reply(messages.PROFILE_GRADE_PROMPT, ConversationState.PROFILE_GRADE)
 
-        session.temp_profile_grade = text
+        grade_error = validate_profile_grade(text, self.settings)
+        if grade_error:
+            log_event(logger, "validation_failure", field="default_grade", value=text)
+            return self._reply(
+                f"{grade_error}\n{messages.PROFILE_GRADE_PROMPT}",
+                ConversationState.PROFILE_GRADE,
+            )
+
+        session.temp_profile_grade = text.strip()
         session.current_state = ConversationState.PROFILE_SUBJECT.value
         self.session_repo.save(session)
         return self._reply(messages.PROFILE_SUBJECT_PROMPT, ConversationState.PROFILE_SUBJECT)
@@ -122,7 +131,19 @@ class ConversationService:
         if not text:
             return self._reply(messages.PROFILE_SUBJECT_PROMPT, ConversationState.PROFILE_SUBJECT)
 
-        session.temp_profile_subject = text
+        subject_error = validate_profile_subject(
+            text,
+            session.temp_profile_grade or "",
+            self.settings,
+        )
+        if subject_error:
+            log_event(logger, "validation_failure", field="default_subject", value=text)
+            return self._reply(
+                f"{subject_error}\n{messages.PROFILE_SUBJECT_PROMPT}",
+                ConversationState.PROFILE_SUBJECT,
+            )
+
+        session.temp_profile_subject = text.strip()
         session.current_state = ConversationState.PROFILE_LANGUAGE.value
         self.session_repo.save(session)
         return self._reply(messages.PROFILE_LANGUAGE_PROMPT, ConversationState.PROFILE_LANGUAGE)
@@ -183,9 +204,12 @@ class ConversationService:
         session.current_state = ConversationState.NEW_LESSON_CONFIRM_SAVE.value
         self.session_repo.save(session)
 
+        syllabus_preview = self._format_syllabus_preview(generation_result.matched_syllabus_rows)
+
         reply = (
             f"{messages.NEW_LESSON_SAVE_PROMPT_PREFIX}\n\n"
             f"{generation_result.lesson_text}\n\n"
+            f"{syllabus_preview}\n\n"
             f"{messages.SAVE_MENU}"
         )
         return self._reply(reply, ConversationState.NEW_LESSON_CONFIRM_SAVE)
@@ -265,3 +289,34 @@ class ConversationService:
         self.session_repo.reset_for_main_menu(session)
         reply = f"{lesson.lesson_text}\n\n{messages.MAIN_MENU}"
         return self._reply(reply, ConversationState.MAIN_MENU)
+
+    def _format_syllabus_preview(self, rows: list[dict]) -> str:
+        if not rows:
+            return "Matched syllabus row: none retrieved."
+
+        blocks: list[str] = []
+        for index, row in enumerate(rows[:2], start=1):
+            block = [
+                f"Matched syllabus row {index}:",
+                f"Grade: {row['grade']}",
+                f"Subject: {row['subject']}",
+            ]
+            if row.get("book"):
+                block.append(f"Book: {row['book']}")
+            if row.get("book_url"):
+                block.append(f"Book URL: {row['book_url']}")
+            block.extend(
+                [
+                    f"Unit: {row.get('unit_name') or 'N/A'}",
+                    f"Topic: {row.get('topic_name') or 'N/A'}",
+                    f"Topic Summary: {row.get('topic_summary') or 'N/A'}",
+                ]
+            )
+            if row.get("lesson_goal"):
+                block.append(f"Lesson Goal: {row['lesson_goal']}")
+            if row.get("keywords"):
+                block.append(f"Keywords: {row['keywords']}")
+            if row.get("source_reference"):
+                block.append(f"Source: {row['source_reference']}")
+            blocks.append("\n".join(block))
+        return "\n\n".join(blocks)

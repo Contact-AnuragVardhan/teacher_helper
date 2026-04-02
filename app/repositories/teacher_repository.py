@@ -1,6 +1,9 @@
 from sqlalchemy.orm import Session
 
+from app.core.logging import get_logger, log_event
 from app.models.teacher_profile import TeacherProfile
+
+logger = get_logger(__name__)
 
 
 class TeacherRepository:
@@ -8,11 +11,18 @@ class TeacherRepository:
         self.db = db
 
     def get_by_whatsapp_number(self, whatsapp_number: str) -> TeacherProfile | None:
-        return (
+        teacher = (
             self.db.query(TeacherProfile)
             .filter(TeacherProfile.whatsapp_number == whatsapp_number)
             .first()
         )
+        log_event(
+            logger,
+            "teacher_lookup",
+            whatsapp_number=whatsapp_number,
+            found=teacher is not None,
+        )
+        return teacher
 
     def upsert(
         self,
@@ -24,6 +34,7 @@ class TeacherRepository:
         preferred_language: str,
     ) -> TeacherProfile:
         teacher = self.get_by_whatsapp_number(whatsapp_number)
+        action = "updated" if teacher else "created"
         if teacher:
             teacher.teacher_name = teacher_name
             teacher.default_grade = default_grade
@@ -41,4 +52,11 @@ class TeacherRepository:
 
         self.db.commit()
         self.db.refresh(teacher)
+        log_event(
+            logger,
+            "teacher_upsert_persisted",
+            whatsapp_number=whatsapp_number,
+            teacher_id=teacher.id,
+            action=action,
+        )
         return teacher

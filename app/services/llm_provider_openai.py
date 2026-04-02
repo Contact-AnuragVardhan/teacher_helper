@@ -1,7 +1,10 @@
 from openai import OpenAI
 
 from app.core.config import Settings
+from app.core.logging import get_logger, log_event
 from app.services.lesson_generation_provider import LessonGenerationProvider, PromptBundle
+
+logger = get_logger(__name__)
 
 
 class OpenAILessonGenerationProvider(LessonGenerationProvider):
@@ -15,8 +18,10 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
             client_kwargs["base_url"] = settings.openai_base_url
         self.client = OpenAI(**client_kwargs)
         self.model = settings.openai_model
+        log_event(logger, "openai_provider_initialized", model=self.model, has_base_url=bool(settings.openai_base_url))
 
     def generate(self, prompt: PromptBundle) -> str:
+        log_event(logger, "openai_request_started", model=self.model)
         response = self.client.chat.completions.create(
             model=self.model,
             temperature=0.2,
@@ -27,5 +32,7 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
         )
         content = response.choices[0].message.content if response.choices else None
         if not content:
+            log_event(logger, "openai_response_empty", model=self.model)
             raise RuntimeError("LLM response was empty.")
+        log_event(logger, "openai_request_completed", model=self.model)
         return content.strip()

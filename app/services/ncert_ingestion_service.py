@@ -4,6 +4,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from pypdf import PdfReader
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -27,41 +28,348 @@ class NcertIngestionService:
         self.repo = NcertContentRepository(db)
         self.settings = get_settings()
 
-    def ingest_path(self, path: str | Path, truncate_first: bool = False) -> IngestionSummary:
+    def ingest_path(
+        self,
+        path: str | Path,
+        truncate_first: bool = False,
+        include_supplementary: bool = False,
+    ) -> IngestionSummary:
         input_path = Path(path)
         if not input_path.exists():
+            log_event(logger, "ncert_ingest_path_missing", path=str(input_path))
             raise FileNotFoundError(f"Path not found: {input_path}")
 
         if truncate_first:
             self.repo.truncate()
             log_event(logger, "ncert_truncate", path=str(input_path))
 
-        files = [input_path] if input_path.is_file() else sorted(
-            p for p in input_path.rglob("*") if p.is_file() and p.suffix.lower() in {".json", ".csv"}
-        )
-
+        total_files_processed = 0
         total_records = 0
         total_chunks = 0
-        for file_path in files:
+
+        if input_path.is_file():
+            if input_path.suffix.lower() not in {".json", ".csv"}:
+                raise ValueError("Single-file ingestion supports only JSON or CSV files.")
+            raw_records = self._read_records(input_path)
+            rows = self._normalize_records(raw_records)
+            if rows:
+                self.repo.bulk_create(rows)
+            total_files_processed = 1
+            total_records = len(raw_records)
+            total_chunks = len(rows)
+            return IngestionSummary(
+                files_processed=total_files_processed,
+                records_processed=total_records,
+                chunks_created=total_chunks,
+            )
+
+        structured_files = sorted(
+            p for p in input_path.rglob("*") if p.is_file() and p.suffix.lower() in {".json", ".csv"}
+        )
+        book_dirs = self._discover_book_dirs(input_path)
+
+        log_event(
+            logger,
+            "ncert_ingest_started",
+            path=str(input_path),
+            truncate_first=truncate_first,
+            structured_file_count=len(structured_files),
+            book_directory_count=len(book_dirs),
+            include_supplementary=include_supplementary,
+        )
+
+        for file_path in structured_files:
             raw_records = self._read_records(file_path)
             rows = self._normalize_records(raw_records)
             if rows:
                 self.repo.bulk_create(rows)
+
+            total_files_processed += 1
             total_records += len(raw_records)
             total_chunks += len(rows)
+
             log_event(
                 logger,
-                "ncert_ingest_file",
+                "ncert_ingest_structured_file",
                 path=str(file_path),
                 records=len(raw_records),
                 chunks=len(rows),
             )
 
-        return IngestionSummary(
-            files_processed=len(files),
+        for book_dir in book_dirs:
+            raw_records, pdf_count = self._read_book_directory_records(
+                root_path=input_path,
+                book_dir=book_dir,
+                include_supplementary=include_supplementary,
+            )
+            rows = self._normalize_records(raw_records)
+            if rows:
+                self.repo.bulk_create(rows)
+
+            total_files_processed += pdf_count
+            total_records += len(raw_records)
+            total_chunks += len(rows)
+
+            log_event(
+                logger,
+                "ncert_ingest_book_directory",
+                path=str(book_dir),
+                pdf_files=pdf_count,
+                records=len(raw_records),
+                chunks=len(rows),
+            )
+
+        if total_files_processed == 0 and total_records == 0:
+            raise ValueError(
+                "No ingestible content found. Expected JSON/CSV files or book folders containing url.txt and chapter PDFs."
+            )
+
+        log_event(
+            logger,
+            "ncert_ingest_completed",
+            path=str(input_path),
+            files_processed=total_files_processed,
             records_processed=total_records,
             chunks_created=total_chunks,
         )
+        return IngestionSummary(
+            files_processed=total_files_processed,
+            records_processed=total_records,
+            chunks_created=total_chunks,
+        )
+
+    def _discover_book_dirs(self, root_path: Path) -> list[Path]:
+        book_dirs = {url_file.parent for url_file in root_path.rglob("url.txt")}
+        return sorted(book_dirs)
+
+    def _read_book_directory_records(
+        self,
+        *,
+        root_path: Path,
+        book_dir: Path,
+        include_supplementary: bool,
+    ) -> tuple[list[dict], int]:
+        rel_parts = book_dir.relative_to(root_path).parts
+
+        if len(rel_parts) < 3:
+            log_event(
+                logger,
+                "ncert_book_dir_skipped",
+                path=str(book_dir),
+                reason="expected at least Grade/Subject/.../BookName structure",
+            )
+            return [], 0
+
+        grade = self._normalize_grade(rel_parts[0])
+        subject = rel_parts[1].strip()
+        book = book_dir.name.strip()
+        book_url = self._read_book_url(book_dir)
+
+        pdf_paths = sorted(p for p in book_dir.glob("*.pdf"))
+        records: list[dict] = []
+        processed_pdf_count = 0
+
+        for pdf_path in pdf_paths:
+            full_text, first_page_text = self._extract_pdf_text(pdf_path)
+            if not full_text.strip():
+                log_event(logger, "ncert_pdf_skipped_empty", path=str(pdf_path))
+                continue
+
+            if not include_supplementary and self._looks_like_supplementary(pdf_path, first_page_text):
+                log_event(logger, "ncert_pdf_skipped_supplementary", path=str(pdf_path))
+                continue
+
+            chapter, unit_name, topic_name = self._infer_pdf_labels(first_page_text, pdf_path)
+            topic_summary = self._build_topic_summary(full_text, topic_name)
+            lesson_goal = self._build_lesson_goal(subject, topic_name, book)
+
+            records.append(
+                {
+                    "grade": grade,
+                    "subject": subject,
+                    "book": book,
+                    "book_url": book_url,
+                    "chapter": chapter,
+                    "topic": topic_name,
+                    "unit_name": unit_name,
+                    "topic_name": topic_name,
+                    "topic_summary": topic_summary,
+                    "lesson_goal": lesson_goal,
+                    "source_reference": book_url or f"{subject}/{book}",
+                    "source_title": f"{book} - {topic_name or pdf_path.stem}",
+                    "content": full_text,
+                    "keywords": ", ".join(
+                        filter(
+                            None,
+                            [
+                                grade,
+                                subject,
+                                book,
+                                chapter or "",
+                                unit_name or "",
+                                topic_name or "",
+                                pdf_path.stem,
+                            ],
+                        )
+                    ),
+                }
+            )
+            processed_pdf_count += 1
+
+        return records, processed_pdf_count
+
+    def _read_book_url(self, book_dir: Path) -> str | None:
+        url_file = book_dir / "url.txt"
+        if not url_file.exists():
+            return None
+        try:
+            first_line = url_file.read_text(encoding="utf-8").splitlines()[0].strip()
+            return first_line or None
+        except Exception as exc:
+            log_event(logger, "ncert_book_url_read_failed", path=str(url_file), error=str(exc))
+            return None
+
+    def _extract_pdf_text(self, pdf_path: Path) -> tuple[str, str]:
+        try:
+            reader = PdfReader(str(pdf_path))
+            page_texts: list[str] = []
+            for page in reader.pages:
+                page_text = page.extract_text() or ""
+                page_text = page_text.replace("\x00", " ")
+                page_text = re.sub(r"[ \t]+\n", "\n", page_text)
+                page_text = re.sub(r"\n{3,}", "\n\n", page_text)
+                page_text = re.sub(r"[ \t]{2,}", " ", page_text)
+                cleaned = page_text.strip()
+                if cleaned:
+                    page_texts.append(cleaned)
+
+            full_text = "\n\n".join(page_texts).strip()
+            first_page_text = page_texts[0] if page_texts else ""
+            return full_text, first_page_text
+        except Exception as exc:
+            log_event(logger, "ncert_pdf_extract_failed", path=str(pdf_path), error=str(exc))
+            return "", ""
+
+    def _looks_like_supplementary(self, pdf_path: Path, first_page_text: str) -> bool:
+        stem = pdf_path.stem.casefold()
+        if stem.endswith("ps") or stem.endswith("an"):
+            return True
+
+        preview = " ".join(first_page_text.split()).casefold()
+        markers = [
+            "prelims",
+            "appendix",
+            "appendices",
+            "answers to exercises",
+            "answer key",
+            "index",
+        ]
+        return any(marker in preview for marker in markers)
+
+    def _infer_pdf_labels(self, first_page_text: str, pdf_path: Path) -> tuple[str | None, str | None, str | None]:
+        lines = [self._clean_line(line) for line in first_page_text.splitlines()]
+        lines = [line for line in lines if line]
+
+        chapter: str | None = None
+        unit_name: str | None = None
+
+        for line in lines[:20]:
+            if re.search(r"\bUnit\s+\d+\b", line, re.IGNORECASE):
+                unit_name = line
+                break
+
+        for line in lines[:10]:
+            if re.fullmatch(r"CHAPTER\s+[A-Z0-9-]+", line.strip(), re.IGNORECASE):
+                chapter = line.title()
+                break
+            if re.fullmatch(r"Chapter\s+\d+.*", line.strip(), re.IGNORECASE):
+                chapter = line.strip()
+                break
+
+        topic_name = self._infer_topic_name(lines)
+        if not chapter:
+            chapter = unit_name or pdf_path.stem
+
+        return chapter, unit_name, topic_name or pdf_path.stem
+
+    def _infer_topic_name(self, lines: list[str]) -> str | None:
+        fallback: str | None = None
+
+        for line in lines[:20]:
+            candidate = re.sub(r"^\d+[\.\)]?\s*", "", line).strip()
+            if not candidate:
+                continue
+
+            upper = candidate.upper()
+            lower = candidate.casefold()
+
+            if ".indd" in lower:
+                continue
+            if "reprint" in lower:
+                continue
+            if "grade " in lower and len(candidate.split()) <= 4:
+                continue
+            if upper.startswith("CHAPTER "):
+                continue
+            if upper.startswith("APPENDIX"):
+                continue
+            if lower in {"contents", "textbook", "physics", "santoor"}:
+                continue
+
+            if lower.startswith("let us "):
+                if fallback is None:
+                    fallback = candidate
+                continue
+
+            if len(candidate.split()) > 18:
+                continue
+
+            return candidate
+
+        return fallback
+
+    def _build_topic_summary(self, full_text: str, topic_name: str | None) -> str:
+        text = full_text.strip()
+        if not text:
+            return ""
+
+        if topic_name:
+            idx = text.casefold().find(topic_name.casefold())
+            if idx != -1:
+                text = text[idx + len(topic_name):].strip()
+
+        text = re.sub(r"\s+", " ", text).strip()
+        return text[:700]
+
+    def _build_lesson_goal(self, subject: str, topic_name: str | None, book: str) -> str:
+        topic_label = topic_name or "this chapter"
+        subject_lower = subject.strip().casefold()
+
+        if subject_lower == "english":
+            return (
+                f"Help students understand '{topic_label}' from the NCERT book '{book}', "
+                f"with focus on reading comprehension, vocabulary, discussion, and classroom participation."
+            )
+
+        if subject_lower == "physics":
+            return (
+                f"Help students understand the core concepts in '{topic_label}' from the NCERT book '{book}', "
+                f"with focus on definitions, explanation, examples, and problem-solving readiness."
+            )
+
+        return (
+            f"Teach the key ideas of '{topic_label}' from the NCERT book '{book}' "
+            f"in a classroom-ready way for {subject}."
+        )
+
+    def _normalize_grade(self, value: str) -> str:
+        cleaned = value.strip()
+        match = re.search(r"(\d+)", cleaned)
+        return match.group(1) if match else cleaned
+
+    def _clean_line(self, value: str) -> str:
+        value = re.sub(r"\s+", " ", value or "").strip()
+        return value
 
     def _read_records(self, file_path: Path) -> list[dict]:
         suffix = file_path.suffix.lower()
@@ -88,15 +396,40 @@ class NcertIngestionService:
         for record in records:
             grade = self._clean(record.get("grade"))
             subject = self._clean(record.get("subject"))
+
             chapter = self._clean(record.get("chapter")) or None
             topic = self._clean(record.get("topic")) or None
-            source_title = self._clean(record.get("source_title"))
-            content = self._clean(record.get("content_chunk") or record.get("content"))
-            keywords = self._keywords_string(record, grade, subject, chapter, topic, source_title, content)
+            source_title = self._clean(record.get("source_title") or record.get("source_reference"))
+            content = self._clean(record.get("content_chunk") or record.get("content") or record.get("topic_summary"))
+
+            book = self._clean(record.get("book")) or None
+            book_url = self._clean(record.get("book_url")) or None
+            unit_name = self._clean(record.get("unit_name") or chapter) or None
+            topic_name = self._clean(record.get("topic_name") or topic) or None
+            topic_summary = self._clean(record.get("topic_summary") or content) or None
+            lesson_goal = self._clean(record.get("lesson_goal")) or None
+            source_reference = self._clean(record.get("source_reference") or source_title) or None
+
+            keywords = self._keywords_string(
+                record,
+                grade,
+                subject,
+                chapter,
+                topic,
+                book,
+                book_url,
+                unit_name,
+                topic_name,
+                source_title,
+                source_reference,
+                topic_summary,
+                lesson_goal,
+                content,
+            )
 
             if not grade or not subject or not source_title or not content:
                 raise ValueError(
-                    "Each NCERT record must include grade, subject, source_title, and content/content_chunk."
+                    "Each NCERT record must include grade, subject, source_title/source_reference, and content/content_chunk/topic_summary."
                 )
 
             for chunk in self._chunk_text(content):
@@ -108,6 +441,13 @@ class NcertIngestionService:
                         topic=topic,
                         source_title=source_title,
                         content_chunk=chunk,
+                        book=book,
+                        book_url=book_url,
+                        unit_name=unit_name,
+                        topic_name=topic_name,
+                        topic_summary=topic_summary,
+                        lesson_goal=lesson_goal,
+                        source_reference=source_reference,
                         keywords=keywords,
                     )
                 )
@@ -123,15 +463,41 @@ class NcertIngestionService:
         subject: str,
         chapter: str | None,
         topic: str | None,
+        book: str | None,
+        book_url: str | None,
+        unit_name: str | None,
+        topic_name: str | None,
         source_title: str,
+        source_reference: str | None,
+        topic_summary: str | None,
+        lesson_goal: str | None,
         content: str,
     ) -> str:
         explicit = self._clean(record.get("keywords"))
         tokens: list[str] = []
+
         if explicit:
             tokens.extend(re.split(r"[,;|]", explicit))
-        tokens.extend([grade, subject, chapter or "", topic or "", source_title])
+
+        tokens.extend(
+            [
+                grade,
+                subject,
+                chapter or "",
+                topic or "",
+                book or "",
+                book_url or "",
+                unit_name or "",
+                topic_name or "",
+                source_title,
+                source_reference or "",
+            ]
+        )
+
+        tokens.extend(re.findall(r"[A-Za-z][A-Za-z0-9-]+", topic_summary or "")[:15])
+        tokens.extend(re.findall(r"[A-Za-z][A-Za-z0-9-]+", lesson_goal or "")[:15])
         tokens.extend(re.findall(r"[A-Za-z][A-Za-z0-9-]+", content)[:20])
+
         deduped: list[str] = []
         seen: set[str] = set()
         for token in tokens:
@@ -143,6 +509,7 @@ class NcertIngestionService:
                 continue
             seen.add(lowered)
             deduped.append(cleaned)
+
         return ", ".join(deduped)
 
     def _chunk_text(self, content: str) -> list[str]:
@@ -158,8 +525,10 @@ class NcertIngestionService:
             if len(candidate) <= max_chars:
                 current = candidate
                 continue
+
             if current:
                 chunks.append(current)
+
             if len(paragraph) <= max_chars:
                 current = paragraph
                 continue
