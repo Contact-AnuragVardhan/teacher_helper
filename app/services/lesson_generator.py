@@ -237,12 +237,19 @@ class LessonGeneratorService:
     def _build_source_block(self, rows: list[dict]) -> str:
         if not rows:
             return ""
+
         row = rows[0]
         lines = ["Source:", "NCERT"]
+
         book = row.get("book")
-        chapter = row.get("topic_name") or row.get("chapter") or row.get("unit_name")
+        unit_name = row.get("unit_name")
+        topic_name = row.get("topic_name") or row.get("chapter")
+
         if book:
             lines.append(f"Book: {book}")
-        if chapter:
-            lines.append(f"Chapter: {chapter}")
+        if unit_name:
+            lines.append(f"Unit: {unit_name}")
+        if topic_name:
+            lines.append(f"Chapter: {topic_name}")
+
         return "\n".join(lines)

@@ -7,6 +7,8 @@ class LessonGenerateRequest(BaseModel):
     whatsapp_number: str
     topic: str
     duration_minutes: int
+    grade: str | None = None
+    subject: str | None = None
 
 
 class SyllabusMatchResponse(BaseModel):
@@ -15,6 +17,7 @@ class SyllabusMatchResponse(BaseModel):
     subject: str
     book: str | None = None
     book_url: str | None = None
+    chapter: str | None = None
     unit_name: str | None = None
     topic_name: str | None = None
     topic_summary: str | None = None

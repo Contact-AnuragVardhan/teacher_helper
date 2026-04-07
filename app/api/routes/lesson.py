@@ -25,6 +25,8 @@ def generate_lesson(payload: LessonGenerateRequest, db: Session = Depends(get_db
         whatsapp_number=payload.whatsapp_number,
         topic=payload.topic,
         duration_minutes=payload.duration_minutes,
+        grade=payload.grade,
+        subject=payload.subject,
     )
     teacher = TeacherRepository(db).get_by_whatsapp_number(payload.whatsapp_number)
     if not teacher:
@@ -46,6 +48,8 @@ def generate_lesson(payload: LessonGenerateRequest, db: Session = Depends(get_db
         teacher=teacher,
         topic=payload.topic.strip(),
         duration_minutes=payload.duration_minutes,
+        grade=payload.grade,
+        subject=payload.subject,
     )
     log_event(
         logger,

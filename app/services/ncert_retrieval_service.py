@@ -72,6 +72,7 @@ class RetrievedChunk:
             "subject": self.subject,
             "book": self.book,
             "book_url": self.book_url,
+            "chapter": self.chapter,
             "unit_name": self.unit_name or self.chapter,
             "topic_name": self.topic_name or self.topic,
             "topic_summary": self.topic_summary or self.content_chunk,
@@ -94,7 +95,6 @@ class NcertRetrievalService:
         rows = self.repo.find_by_grade_and_subject(grade=grade, subject=subject)
         topic_tokens = self._topic_tokens(topic)
 
-        # If the user topic has no meaningful tokens, do not try fuzzy chapter matching.
         if not topic_tokens:
             log_event(
                 logger,
@@ -140,9 +140,8 @@ class NcertRetrievalService:
             scored,
             key=lambda item: (
                 item.score,
-                len(item.exact_matches),
-                len(item.partial_matches),
-                -item.id,
+                len(set(item.exact_matches)),
+                len(set(item.partial_matches)),
             ),
             reverse=True,
         )[:limit]
@@ -160,6 +159,7 @@ class NcertRetrievalService:
                     "id": item.id,
                     "score": item.score,
                     "source_title": item.source_title,
+                    "chapter": item.chapter,
                     "topic_name": item.topic_name,
                     "exact_matches": item.exact_matches,
                     "partial_matches": item.partial_matches,
@@ -169,43 +169,50 @@ class NcertRetrievalService:
         )
         return ranked
 
-    def _score_row(self, row: NcertContent, topic: str, topic_tokens: list[str]) -> tuple[int, list[str], list[str]]:
-        searchable = " ".join(
-            filter(
-                None,
-                [
-                    row.topic,
-                    row.topic_name,
-                    row.chapter,
-                    row.book,
-                    row.unit_name,
-                    row.source_title,
-                    row.source_reference,
-                    row.keywords,
-                    row.topic_summary,
-                    row.lesson_goal,
-                    row.content_chunk,
-                ],
-            )
-        ).casefold()
+    def _normalize_text(self, value: str | None) -> str:
+        return re.sub(r"\s+", " ", (value or "").strip()).casefold()
 
-        exact_token_set = set(re.findall(r"[a-z0-9-]+", searchable))
-        topic_phrase = " ".join(topic_tokens)
+    def _score_row(self, row: NcertContent, topic: str, topic_tokens: list[str]) -> tuple[int, list[str], list[str]]:
+        requested = self._normalize_text(topic)
+
+        topic_name = self._normalize_text(row.topic_name or row.topic)
+        source_title = self._normalize_text(row.source_title)
+        unit_name = self._normalize_text(row.unit_name or row.chapter)
+        keywords = self._normalize_text(row.keywords)
+        summary = self._normalize_text(row.topic_summary)
+        content = self._normalize_text(row.content_chunk)
 
         exact_matches: list[str] = []
         partial_matches: list[str] = []
         score = 0
 
-        if topic_phrase and topic_phrase in searchable:
-            score += 200
+        if requested and requested == topic_name:
+            score += 5000
+        elif requested and requested in topic_name:
+            score += 2500
+
+        if requested and requested in source_title:
+            score += 2000
+
+        title_blob = " ".join(filter(None, [topic_name, source_title, unit_name, keywords]))
+        weak_blob = " ".join(filter(None, [summary, content]))
+
+        title_tokens = set(re.findall(r"[a-z0-9-]+", title_blob))
+        weak_tokens = set(re.findall(r"[a-z0-9-]+", weak_blob))
 
         for token in topic_tokens:
-            if token in exact_token_set:
+            if token in title_tokens:
                 exact_matches.append(token)
-                score += 100
-            elif token in searchable:
+                score += 300
+            elif token in title_blob:
                 partial_matches.append(token)
-                score += 30
+                score += 100
+            elif token in weak_tokens:
+                exact_matches.append(token)
+                score += 20
+            elif token in weak_blob:
+                partial_matches.append(token)
+                score += 5
 
         return score, exact_matches, partial_matches
 
@@ -215,17 +222,20 @@ class NcertRetrievalService:
         exact_matches: list[str],
         partial_matches: list[str],
     ) -> bool:
-        matched_count = len(set(exact_matches + partial_matches))
         token_count = len(topic_tokens)
+        exact_count = len(set(exact_matches))
+        matched_count = len(set(exact_matches + partial_matches))
 
         if token_count == 0:
             return False
 
         if token_count == 1:
-            return matched_count >= 1
+            return exact_count >= 1 or matched_count >= 1
 
-        # For multi-word topics, avoid returning unrelated chapters because of one weak token.
-        return len(exact_matches) >= 1 or matched_count >= 2
+        if token_count == 2:
+            return exact_count >= 2 or (exact_count >= 1 and matched_count == 2)
+
+        return exact_count >= 2 or matched_count >= 3
 
     def _topic_tokens(self, topic: str) -> list[str]:
         raw_tokens = re.findall(r"[a-z0-9-]+", topic.casefold())
