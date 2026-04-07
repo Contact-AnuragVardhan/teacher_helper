@@ -34,32 +34,26 @@ class RetrievedChunk:
 
     def as_prompt_snippet(self) -> str:
         topic_label = self.topic_name or self.topic or "Unknown topic"
-        unit_label = self.unit_name or self.chapter or "Unknown unit"
-        summary = (self.topic_summary or self.content_chunk).strip()
-        goal = (self.lesson_goal or "").strip()
-        keywords = (self.keywords or "").strip()
-        source = (self.source_reference or self.source_title).strip()
+        chapter_label = self.chapter or self.unit_name or topic_label
+        summary = self._clean_summary(self.topic_summary or self.content_chunk)
+        goal = self._clean_summary(self.lesson_goal)
 
         parts = [
+            "NCERT syllabus match",
             f"Grade: {self.grade}",
             f"Subject: {self.subject}",
         ]
         if self.book:
             parts.append(f"Book: {self.book}")
-        if self.book_url:
-            parts.append(f"Book URL: {self.book_url}")
-        parts.extend(
-            [
-                f"Unit: {unit_label}",
-                f"Topic: {topic_label}",
-                f"Topic Summary: {summary}",
-            ]
-        )
+        parts.append(f"Chapter: {chapter_label}")
+        parts.append(f"Topic: {topic_label}")
+        if summary:
+            parts.append(f"Clean chapter context: {summary}")
         if goal:
-            parts.append(f"Lesson Goal: {goal}")
-        if keywords:
-            parts.append(f"Keywords: {keywords}")
-        parts.append(f"Source: {source}")
+            parts.append(f"Teaching focus: {goal}")
+        parts.append(
+            "Use the chapter context for grounding only. Do not copy metadata, URLs, OCR noise, or keyword lists into the lesson."
+        )
         return "\n".join(parts)
 
     def as_inspectable_row(self) -> dict:
@@ -69,6 +63,7 @@ class RetrievedChunk:
             "subject": self.subject,
             "book": self.book,
             "book_url": self.book_url,
+            "chapter": self.chapter,
             "unit_name": self.unit_name or self.chapter,
             "topic_name": self.topic_name or self.topic,
             "topic_summary": self.topic_summary or self.content_chunk,
@@ -79,6 +74,45 @@ class RetrievedChunk:
             "exact_matches": self.exact_matches,
             "partial_matches": self.partial_matches,
         }
+
+    def _clean_summary(self, value: str | None, max_chars: int = 320) -> str:
+        text = (value or "").strip()
+        if not text:
+            return ""
+
+        text = re.sub(r"https?://\S+", " ", text)
+        text = re.sub(r"\bChap\s+\d+\.indd\b", " ", text, flags=re.IGNORECASE)
+        text = re.sub(r"\bReprint\s+\d{4}(?:-\d{2})?\b", " ", text, flags=re.IGNORECASE)
+        text = re.sub(r"\b\d{1,2}/\d{1,2}/\d{4}\b", " ", text)
+        text = re.sub(r"\b\d{1,2}:\d{2}:\d{2}\s*[AP]M\b", " ", text, flags=re.IGNORECASE)
+        text = re.sub(r"[•]", " ", text)
+        text = re.sub(r"\s+", " ", text).strip(" ,.-")
+
+        sentences: list[str] = []
+        for sentence in re.split(r"(?<=[.!?])\s+", text):
+            candidate = sentence.strip()
+            if not candidate:
+                continue
+            lowered = candidate.casefold()
+            if any(
+                marker in lowered
+                for marker in [
+                    ".indd",
+                    "reprint",
+                    "book url",
+                    "keywords",
+                    "matched syllabus row",
+                ]
+            ):
+                continue
+            if sum(ch.isdigit() for ch in candidate) > 8:
+                continue
+            sentences.append(candidate)
+            if len(" ".join(sentences)) >= max_chars:
+                break
+
+        cleaned = " ".join(sentences) if sentences else text
+        return cleaned[:max_chars].strip(" ,.-")
 
 
 class NcertRetrievalService:

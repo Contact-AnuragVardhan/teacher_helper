@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import re
 
 from sqlalchemy.orm import Session
 
@@ -39,7 +40,18 @@ class LessonGeneratorService:
         self.deterministic_provider = deterministic_provider or DeterministicTemplateProvider()
         self.openai_provider = openai_provider
 
-    def generate(self, *, teacher: TeacherProfile, topic: str, duration_minutes: int) -> LessonGenerationResult:
+    def generate(
+        self,
+        *,
+        teacher: TeacherProfile,
+        topic: str,
+        duration_minutes: int,
+        grade: str | None = None,
+        subject: str | None = None,
+    ) -> LessonGenerationResult:
+        effective_grade = (grade or teacher.default_grade).strip()
+        effective_subject = (subject or teacher.default_subject).strip()
+
         log_event(
             logger,
             "lesson_generation_started",
@@ -47,10 +59,12 @@ class LessonGeneratorService:
             topic=topic,
             duration_minutes=duration_minutes,
             preferred_language=teacher.preferred_language,
+            grade=effective_grade,
+            subject=effective_subject,
         )
         retrieved_chunks = self.retrieval_service.retrieve(
-            grade=teacher.default_grade,
-            subject=teacher.default_subject,
+            grade=effective_grade,
+            subject=effective_subject,
             topic=topic,
         )
         snippet_texts = [item.as_prompt_snippet() for item in retrieved_chunks]
@@ -58,12 +72,13 @@ class LessonGeneratorService:
 
         prompt = self.prompt_builder.build(
             PromptBuilderInput(
-                grade=teacher.default_grade,
-                subject=teacher.default_subject,
+                grade=effective_grade,
+                subject=effective_subject,
                 preferred_language=teacher.preferred_language,
                 topic=topic,
                 duration_minutes=duration_minutes,
                 retrieved_snippets=snippet_texts,
+                matched_syllabus_rows=inspectable_rows,
             )
         )
 
@@ -82,6 +97,8 @@ class LessonGeneratorService:
             )
             lesson_text = self.deterministic_provider.generate(prompt)
             provider_used = self.deterministic_provider.provider_name
+
+        lesson_text = self._finalize_lesson_text(lesson_text, inspectable_rows)
 
         log_event(
             logger,
@@ -106,3 +123,76 @@ class LessonGeneratorService:
             return OpenAILessonGenerationProvider(self.settings)
         log_event(logger, "lesson_generation_provider_initialized", provider=self.deterministic_provider.provider_name)
         return self.deterministic_provider
+
+    def _finalize_lesson_text(self, lesson_text: str, rows: list[dict]) -> str:
+        text = (lesson_text or "").replace("\r\n", "\n").strip()
+        if not text:
+            return text
+
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        text = re.sub(r"\n+Matched syllabus row\s*\d*:.*$", "", text, flags=re.IGNORECASE | re.DOTALL)
+        text = self._strip_trailing_source_block(text)
+
+        cleaned_lines: list[str] = []
+        for line in text.splitlines():
+            stripped = line.strip()
+            lowered = stripped.casefold()
+            if any(
+                lowered.startswith(prefix)
+                for prefix in (
+                    "grade:",
+                    "subject:",
+                    "book url:",
+                    "topic summary:",
+                    "keywords:",
+                    "lesson goal:",
+                )
+            ):
+                continue
+            cleaned_lines.append(line.rstrip())
+
+        text = "\n".join(cleaned_lines).strip()
+        source_block = self._build_source_block(rows)
+        if source_block:
+            text = f"{text}\n\n{source_block}".strip()
+        return re.sub(r"\n{3,}", "\n\n", text)
+
+    def _strip_trailing_source_block(self, text: str) -> str:
+        lines = text.splitlines()
+        while lines and not lines[-1].strip():
+            lines.pop()
+
+        idx = len(lines) - 1
+        source_line_index: int | None = None
+        allowed_prefixes = ("ncert", "book:", "chapter:", "source:")
+
+        while idx >= 0:
+            stripped = lines[idx].strip()
+            if not stripped:
+                idx -= 1
+                continue
+            if stripped.casefold() == "source":
+                source_line_index = idx
+                break
+            if stripped.casefold().startswith(allowed_prefixes):
+                idx -= 1
+                continue
+            break
+
+        if source_line_index is None:
+            return text.strip()
+
+        return "\n".join(lines[:source_line_index]).strip()
+
+    def _build_source_block(self, rows: list[dict]) -> str:
+        if not rows:
+            return ""
+        row = rows[0]
+        lines = ["Source", "NCERT"]
+        book = row.get("book")
+        chapter = row.get("topic_name") or row.get("chapter") or row.get("unit_name")
+        if book:
+            lines.append(f"Book: {book}")
+        if chapter:
+            lines.append(f"Chapter: {chapter}")
+        return "\n".join(lines)

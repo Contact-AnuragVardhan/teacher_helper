@@ -48,6 +48,8 @@ class ConversationService:
             ConversationState.PROFILE_SUBJECT: self._handle_profile_subject,
             ConversationState.PROFILE_LANGUAGE: self._handle_profile_language,
             ConversationState.NEW_LESSON_TOPIC: self._handle_new_lesson_topic,
+            ConversationState.NEW_LESSON_GRADE: self._handle_new_lesson_grade,
+            ConversationState.NEW_LESSON_SUBJECT: self._handle_new_lesson_subject,
             ConversationState.NEW_LESSON_DURATION: self._handle_new_lesson_duration,
             ConversationState.NEW_LESSON_CONFIRM_SAVE: self._handle_new_lesson_confirm_save,
             ConversationState.NEW_LESSON_NAME: self._handle_new_lesson_name,
@@ -70,8 +72,40 @@ class ConversationService:
     def _main_menu_with_prefix(self, prefix: str) -> str:
         return f"{prefix}\n\n{messages.MAIN_MENU}"
 
+    def _format_lesson_titles(self, titles: list[str]) -> str:
+        return "\n".join(f"{index}. {title}" for index, title in enumerate(titles, start=1))
+
+    def _is_greeting(self, choice: str) -> bool:
+        return choice in {
+            "hi",
+            "hello",
+            "hey",
+            "hii",
+            "hiii",
+            "helo",
+            "hola",
+            "good morning",
+            "good afternoon",
+            "good evening",
+            "start",
+        }
+
+    def _new_lesson_grade_prompt(self) -> str:
+        return "Please enter the grade/class for this lesson."
+
+    def _new_lesson_subject_prompt(self) -> str:
+        return "Please enter the subject for this lesson."
+
     def _handle_main_menu(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         choice = normalize_choice(text)
+
+        if not choice or self._is_greeting(choice):
+            return self._reply(
+                self._main_menu_with_prefix(
+                    "Hello! Welcome to Teacher Helper. I can help you create, save, and view lesson plans."
+                ),
+                ConversationState.MAIN_MENU,
+            )
 
         if choice in {"1", "new lesson"}:
             teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
@@ -80,6 +114,8 @@ class ConversationService:
                 self.session_repo.clear_temp_profile(session)
                 return self._reply(messages.NEW_LESSON_WITHOUT_PROFILE, ConversationState.PROFILE_NAME)
 
+            session.temp_profile_grade = None
+            session.temp_profile_subject = None
             session.current_state = ConversationState.NEW_LESSON_TOPIC.value
             self.session_repo.save(session)
             return self._reply(messages.NEW_LESSON_TOPIC_PROMPT, ConversationState.NEW_LESSON_TOPIC)
@@ -92,14 +128,43 @@ class ConversationService:
                 ConversationState.RETRIEVE_LESSON_NAME,
             )
 
-        if choice in {"3", "my profile"}:
+        if choice in {"3", "all lessons"}:
+            teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+            if not teacher:
+                session.current_state = ConversationState.PROFILE_NAME.value
+                self.session_repo.clear_temp_profile(session)
+                return self._reply(messages.NEW_LESSON_WITHOUT_PROFILE, ConversationState.PROFILE_NAME)
+
+            titles = self.lesson_repo.list_titles_by_teacher(teacher.id)
+            if not titles:
+                self.session_repo.reset_for_main_menu(session)
+                return self._reply(
+                    self._main_menu_with_prefix(messages.ALL_LESSONS_EMPTY),
+                    ConversationState.MAIN_MENU,
+                )
+
+            session.current_state = ConversationState.RETRIEVE_LESSON_NAME.value
+            self.session_repo.save(session)
+            reply = (
+                f"{messages.ALL_LESSONS_LIST_PREFIX}\n"
+                f"{self._format_lesson_titles(titles)}\n\n"
+                f"{messages.ALL_LESSONS_SELECTION_PROMPT}"
+            )
+            return self._reply(reply, ConversationState.RETRIEVE_LESSON_NAME)
+
+        if choice in {"4", "my profile"}:
             session.current_state = ConversationState.PROFILE_NAME.value
             self.session_repo.clear_temp_profile(session)
             teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
             prompt = messages.PROFILE_UPDATED if teacher else messages.PROFILE_START
             return self._reply(prompt, ConversationState.PROFILE_NAME)
 
-        return self._reply(messages.INVALID_MAIN_MENU, ConversationState.MAIN_MENU)
+        return self._reply(
+            self._main_menu_with_prefix(
+                "I can help with creating a new lesson, finding saved lessons, or updating your profile. Please choose one of the options below."
+            ),
+            ConversationState.MAIN_MENU,
+        )
 
     def _handle_profile_name(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         if not text:
@@ -172,6 +237,41 @@ class ConversationService:
             return self._reply(messages.NEW_LESSON_TOPIC_INVALID, ConversationState.NEW_LESSON_TOPIC)
 
         session.temp_topic = text
+        session.current_state = ConversationState.NEW_LESSON_GRADE.value
+        self.session_repo.save(session)
+        return self._reply(self._new_lesson_grade_prompt(), ConversationState.NEW_LESSON_GRADE)
+
+    def _handle_new_lesson_grade(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        if not text:
+            return self._reply(self._new_lesson_grade_prompt(), ConversationState.NEW_LESSON_GRADE)
+
+        grade_error = validate_profile_grade(text, self.settings)
+        if grade_error:
+            log_event(logger, "validation_failure", field="lesson_grade", value=text)
+            return self._reply(
+                f"{grade_error}\n{self._new_lesson_grade_prompt()}",
+                ConversationState.NEW_LESSON_GRADE,
+            )
+
+        session.temp_profile_grade = text.strip()
+        session.current_state = ConversationState.NEW_LESSON_SUBJECT.value
+        self.session_repo.save(session)
+        return self._reply(self._new_lesson_subject_prompt(), ConversationState.NEW_LESSON_SUBJECT)
+
+    def _handle_new_lesson_subject(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        if not text:
+            return self._reply(self._new_lesson_subject_prompt(), ConversationState.NEW_LESSON_SUBJECT)
+
+        lesson_grade = session.temp_profile_grade or ""
+        subject_error = validate_profile_subject(text, lesson_grade, self.settings)
+        if subject_error:
+            log_event(logger, "validation_failure", field="lesson_subject", value=text)
+            return self._reply(
+                f"{subject_error}\n{self._new_lesson_subject_prompt()}",
+                ConversationState.NEW_LESSON_SUBJECT,
+            )
+
+        session.temp_profile_subject = text.strip()
         session.current_state = ConversationState.NEW_LESSON_DURATION.value
         self.session_repo.save(session)
         return self._reply(
@@ -194,22 +294,24 @@ class ConversationService:
             self.session_repo.save(session)
             return self._reply(messages.NEW_LESSON_WITHOUT_PROFILE, ConversationState.PROFILE_NAME)
 
+        lesson_grade = (session.temp_profile_grade or "").strip() or teacher.default_grade
+        lesson_subject = (session.temp_profile_subject or "").strip() or teacher.default_subject
+
         generation_result = self.lesson_generator.generate(
             teacher=teacher,
             topic=session.temp_topic or "",
             duration_minutes=duration,
+            grade=lesson_grade,
+            subject=lesson_subject,
         )
         session.temp_duration_minutes = duration
         session.temp_generated_lesson = generation_result.lesson_text
         session.current_state = ConversationState.NEW_LESSON_CONFIRM_SAVE.value
         self.session_repo.save(session)
 
-        syllabus_preview = self._format_syllabus_preview(generation_result.matched_syllabus_rows)
-
         reply = (
             f"{messages.NEW_LESSON_SAVE_PROMPT_PREFIX}\n\n"
             f"{generation_result.lesson_text}\n\n"
-            f"{syllabus_preview}\n\n"
             f"{messages.SAVE_MENU}"
         )
         return self._reply(reply, ConversationState.NEW_LESSON_CONFIRM_SAVE)
@@ -241,12 +343,15 @@ class ConversationService:
             self.session_repo.save(session)
             return self._reply(messages.NEW_LESSON_WITHOUT_PROFILE, ConversationState.PROFILE_NAME)
 
+        lesson_grade = (session.temp_profile_grade or "").strip() or teacher.default_grade
+        lesson_subject = (session.temp_profile_subject or "").strip() or teacher.default_subject
+
         lesson = self.lesson_repo.create_or_update_by_policy(
             teacher_id=teacher.id,
             lesson_name=text,
             topic=session.temp_topic or "",
-            grade=teacher.default_grade,
-            subject=teacher.default_subject,
+            grade=lesson_grade,
+            subject=lesson_subject,
             duration_minutes=session.temp_duration_minutes or 0,
             lesson_text=session.temp_generated_lesson or "",
         )
@@ -289,34 +394,3 @@ class ConversationService:
         self.session_repo.reset_for_main_menu(session)
         reply = f"{lesson.lesson_text}\n\n{messages.MAIN_MENU}"
         return self._reply(reply, ConversationState.MAIN_MENU)
-
-    def _format_syllabus_preview(self, rows: list[dict]) -> str:
-        if not rows:
-            return "Matched syllabus row: none retrieved."
-
-        blocks: list[str] = []
-        for index, row in enumerate(rows[:2], start=1):
-            block = [
-                f"Matched syllabus row {index}:",
-                f"Grade: {row['grade']}",
-                f"Subject: {row['subject']}",
-            ]
-            if row.get("book"):
-                block.append(f"Book: {row['book']}")
-            if row.get("book_url"):
-                block.append(f"Book URL: {row['book_url']}")
-            block.extend(
-                [
-                    f"Unit: {row.get('unit_name') or 'N/A'}",
-                    f"Topic: {row.get('topic_name') or 'N/A'}",
-                    f"Topic Summary: {row.get('topic_summary') or 'N/A'}",
-                ]
-            )
-            if row.get("lesson_goal"):
-                block.append(f"Lesson Goal: {row['lesson_goal']}")
-            if row.get("keywords"):
-                block.append(f"Keywords: {row['keywords']}")
-            if row.get("source_reference"):
-                block.append(f"Source: {row['source_reference']}")
-            blocks.append("\n".join(block))
-        return "\n\n".join(blocks)

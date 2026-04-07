@@ -32,6 +32,22 @@ class LessonRepository:
         )
         return lesson
 
+    def list_titles_by_teacher(self, teacher_id: int) -> list[str]:
+        rows = (
+            self.db.query(LessonPlan.lesson_name)
+            .filter(LessonPlan.teacher_id == teacher_id)
+            .order_by(func.lower(LessonPlan.lesson_name))
+            .all()
+        )
+        titles = [row[0] for row in rows]
+        log_event(
+            logger,
+            "lesson_titles_listed",
+            teacher_id=teacher_id,
+            count=len(titles),
+        )
+        return titles
+
     def create(
         self,
         *,

@@ -1,7 +1,8 @@
 MAIN_MENU = """Reply with:
 1 → New Lesson
 2 → My Lessons
-3 → My Profile"""
+3 → All Lessons
+4 → My Profile"""
 
 SAVE_MENU = """Reply:
 1 → Save Lesson
@@ -10,6 +11,10 @@ SAVE_MENU = """Reply:
 INVALID_DURATION = "Please enter class duration in minutes, for example 35."
 LESSON_NOT_FOUND = "I could not find that lesson. Please try another lesson name."
 LESSON_LOOKUP_EXIT_HINT = "Reply with the exact lesson name, or send 0 to return to the main menu."
+
+ALL_LESSONS_EMPTY = "You do not have any saved lessons yet."
+ALL_LESSONS_LIST_PREFIX = "Here are all your saved lessons:"
+ALL_LESSONS_SELECTION_PROMPT = "Reply with the exact lesson name to view it, or send 0 to return to the main menu."
 
 DUPLICATE_LESSON_NAME = (
     "A lesson with this name already exists. Please enter another lesson name."
