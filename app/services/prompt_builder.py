@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from app.services.lesson_generation_provider import PromptBundle
 
@@ -11,36 +11,37 @@ class PromptBuilderInput:
     topic: str
     duration_minutes: int
     retrieved_snippets: list[str]
-    matched_syllabus_rows: list[dict]
+    matched_syllabus_rows: list[dict] = field(default_factory=list)
 
 
 class PromptBuilder:
     def build(self, data: PromptBuilderInput) -> PromptBundle:
         context_block = "\n\n---\n\n".join(data.retrieved_snippets[:3]).strip()
-        has_match = bool(data.matched_syllabus_rows)
-
         if not context_block:
             context_block = (
                 "No NCERT syllabus row was retrieved. "
-                "Use a safe, classroom-ready lesson structure and keep the content generic."
+                "Use a safe, classroom-ready lesson structure and clearly stay generic."
             )
 
-        system_prompt = (
-            "You are a professional lesson planning assistant for Indian K-12 teachers. "
-            "Write polished, classroom-ready lesson plans in simple teacher-friendly language. "
-            "Use the NCERT grounding context only to understand the chapter and topic. "
-            "Do not copy raw syllabus text, OCR fragments, metadata, URLs, keywords, debug labels, or matched-row dumps into the lesson. "
-            "Do not write lines such as Grade:, Subject:, Topic Summary:, Book URL:, Keywords:, or Matched syllabus row. "
-            "For literature lessons, relate the text to real-life experiences, values, feelings, relationships, and classroom discussion. "
-            "Make the lesson feel like a real teacher's plan, not a data extract. "
-            "Return these section titles exactly: Lesson Title, Objective, Opening, Main Teaching, Activity, Q&A, Closing. "
-            "Add a final Source section only when NCERT context is clearly matched."
+        timing_map = self._allocate_timings(data.duration_minutes)
+        timing_block = (
+            f"Opening -> ({timing_map['opening']})\n"
+            f"Main Teaching -> ({timing_map['main_teaching']})\n"
+            f"Activity -> ({timing_map['activity']})\n"
+            f"Q&A -> ({timing_map['qa']})\n"
+            f"Closing -> ({timing_map['closing']})"
         )
 
-        source_instruction = (
-            "- Add a final section titled Source with exactly these lines when NCERT is matched: NCERT, Book: <book if known>, Chapter: <chapter/topic if known>.\n"
-            if has_match
-            else "- Do not add a Source section when no NCERT match is available.\n"
+        system_prompt = (
+            "You are a lesson planning assistant for Indian K-12 teachers. "
+            "Stay aligned to the provided NCERT syllabus context. "
+            "Use simple, professional, teacher-friendly language. "
+            "Return plain text only. "
+            "Return exactly these sections and no extra commentary: "
+            "Lesson Title, Objective, Opening, Main Teaching, Activity, Q&A, Closing. "
+            "The sections Opening, Main Teaching, Activity, Q&A, and Closing MUST each start with a timing in parentheses "
+            "on the first line of the section body, for example '(5 min)' or '(5–7 min)'. "
+            "Do not omit timings. Do not add Source, Notes, Markdown headings, bullets before section titles, or extra sections."
         )
 
         user_prompt = (
@@ -50,20 +51,35 @@ class PromptBuilder:
             f"Preferred language: {data.preferred_language}\n"
             f"Topic: {data.topic}\n"
             f"Duration (minutes): {data.duration_minutes}\n\n"
-            f"Matched NCERT context\n"
+            f"Matched NCERT syllabus context\n"
             f"{context_block}\n\n"
             "Instructions\n"
-            "- Build the lesson around the matched topic.\n"
-            "- Keep the tone professional, practical, and teacher-ready.\n"
-            "- Make the plan duration-aware.\n"
-            "- Use specific teaching moves, not generic filler.\n"
-            "- Keep Main Teaching focused on what the teacher will explain in class.\n"
-            "- Activity should be short, realistic, and easy to run in a regular classroom.\n"
-            "- Q&A should include 3-4 meaningful chapter-based questions.\n"
-            "- Do not include markdown tables.\n"
-            "- Short bullets inside sections are allowed when helpful.\n"
-            f"{source_instruction}"
-            "- Do not add any other headings or commentary."
+            "- Build the lesson around the matched syllabus context above.\n"
+            "- Keep the output concise, classroom-ready, and chapter-specific.\n"
+            "- Use the exact section headings only.\n"
+            "- No markdown like ## or **.\n"
+            "- Do not add Teacher Notes, References, Source, or any extra headings.\n"
+            "- Each of these sections must begin with the timing in parentheses as the very first text in the section body: Opening, Main Teaching, Activity, Q&A, Closing.\n"
+            f"- Use this time distribution exactly:\n{timing_block}\n\n"
+            "Return in this exact plain-text shape:\n"
+            "Lesson Title\n"
+            "<title>\n\n"
+            "Objective\n"
+            "<one concise objective paragraph>\n\n"
+            "Opening\n"
+            "(<time>)\n"
+            "<opening text>\n\n"
+            "Main Teaching\n"
+            "(<time>)\n"
+            "<short teaching points>\n\n"
+            "Activity\n"
+            "(<time>)\n"
+            "<activity text>\n\n"
+            "Q&A\n"
+            "(<time>)\n"
+            "<4 short questions>\n\n"
+            "Closing\n"
+            "(<time>) <closing text>"
         )
 
         return PromptBundle(
@@ -77,5 +93,50 @@ class PromptBuilder:
                 "duration_minutes": data.duration_minutes,
                 "retrieved_snippets": data.retrieved_snippets,
                 "matched_syllabus_rows": data.matched_syllabus_rows,
+                "timing_map": timing_map,
             },
         )
+
+    def _allocate_timings(self, duration_minutes: int) -> dict[str, str]:
+        total = max(10, int(duration_minutes))
+
+        opening = max(3, round(total * 0.125))
+        main_teaching = max(10, round(total * 0.5))
+        activity = max(4, round(total * 0.15))
+        qa = max(4, round(total * 0.125))
+        closing = total - (opening + main_teaching + activity + qa)
+
+        if closing < 3:
+            needed = 3 - closing
+            reducible_order = ["main_teaching", "activity", "opening", "qa"]
+            values = {
+                "opening": opening,
+                "main_teaching": main_teaching,
+                "activity": activity,
+                "qa": qa,
+            }
+            minimums = {
+                "opening": 3,
+                "main_teaching": 10,
+                "activity": 4,
+                "qa": 4,
+            }
+            for key in reducible_order:
+                while needed > 0 and values[key] > minimums[key]:
+                    values[key] -= 1
+                    needed -= 1
+                if needed == 0:
+                    break
+            opening = values["opening"]
+            main_teaching = values["main_teaching"]
+            activity = values["activity"]
+            qa = values["qa"]
+            closing = total - (opening + main_teaching + activity + qa)
+
+        return {
+            "opening": f"{opening} min",
+            "main_teaching": f"{main_teaching} min",
+            "activity": f"{activity} min",
+            "qa": f"{qa} min",
+            "closing": f"{closing} min",
+        }

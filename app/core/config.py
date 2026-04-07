@@ -8,10 +8,21 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_name: str = Field(default="Teacher Helper", validation_alias=AliasChoices("app_name", "APP_NAME"))
     database_url: str = Field(default="sqlite:///./teacher_helper.db", validation_alias=AliasChoices("database_url", "DATABASE_URL"))
-    llm_provider: Literal["deterministic", "openai"] = Field(default="deterministic", validation_alias=AliasChoices("llm_provider", "LLM_PROVIDER"))
+
+    # Keep deterministic as an explicit local override.
+    # For hosted LLMs, provider will be resolved from the model profile.
+    llm_provider: Literal["deterministic", "openai", "google"] = Field(
+        default="openai",
+        validation_alias=AliasChoices("llm_provider", "LLM_PROVIDER"),
+    )
+
     openai_api_key: str | None = Field(default=None, validation_alias=AliasChoices("openai_api_key", "OPENAI_API_KEY"))
     openai_base_url: str | None = Field(default=None, validation_alias=AliasChoices("openai_base_url", "OPENAI_BASE_URL"))
     openai_model: str = Field(default="gpt-4o-mini", validation_alias=AliasChoices("openai_model", "OPENAI_MODEL"))
+
+    # Optional future provider key. No new model tuning env vars are added.
+    google_api_key: str | None = Field(default=None, validation_alias=AliasChoices("google_api_key", "GOOGLE_API_KEY"))
+
     duplicate_lesson_policy: Literal["reject", "overwrite"] = Field(default="reject", validation_alias=AliasChoices("duplicate_lesson_policy", "DUPLICATE_LESSON_POLICY"))
     session_timeout_minutes: int = Field(default=30, validation_alias=AliasChoices("session_timeout_minutes", "SESSION_TIMEOUT_MINUTES"))
     supported_languages: str = Field(default="English", validation_alias=AliasChoices("supported_languages", "SUPPORTED_LANGUAGES"))
