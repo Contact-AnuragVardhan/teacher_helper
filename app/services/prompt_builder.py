@@ -16,11 +16,13 @@ class PromptBuilderInput:
 
 class PromptBuilder:
     def build(self, data: PromptBuilderInput) -> PromptBundle:
+        has_ncert_match = bool(data.retrieved_snippets)
         context_block = "\n\n---\n\n".join(data.retrieved_snippets[:3]).strip()
         if not context_block:
             context_block = (
-                "No NCERT syllabus row was retrieved. "
-                "Use a safe, classroom-ready lesson structure and clearly stay generic."
+                "No NCERT syllabus row matched this topic for the requested grade and subject. "
+                "Create the lesson plan for the requested topic itself using general classroom knowledge. "
+                "Do not switch to another NCERT chapter or poem. Do not invent a Source section."
             )
 
         timing_map = self._allocate_timings(data.duration_minutes)
@@ -34,7 +36,6 @@ class PromptBuilder:
 
         system_prompt = (
             "You are a lesson planning assistant for Indian K-12 teachers. "
-            "Stay aligned to the provided NCERT syllabus context. "
             "Use simple, professional, teacher-friendly language. "
             "Return plain text only. "
             "Return exactly these sections and no extra commentary: "
@@ -44,6 +45,16 @@ class PromptBuilder:
             "Do not omit timings. Do not add Source, Notes, Markdown headings, bullets before section titles, or extra sections."
         )
 
+        match_instruction = (
+            "- Build the lesson around the matched NCERT syllabus context above.\n"
+            "- Keep the output concise, classroom-ready, and chapter-specific.\n"
+            if has_ncert_match
+            else
+            "- No NCERT syllabus match was found. Build the lesson for the requested topic itself.\n"
+            "- Do not substitute another poem, chapter, or textbook topic.\n"
+            "- Do not add a Source section when no NCERT match exists.\n"
+        )
+
         user_prompt = (
             f"Teacher request\n"
             f"Grade: {data.grade}\n"
@@ -51,14 +62,12 @@ class PromptBuilder:
             f"Preferred language: {data.preferred_language}\n"
             f"Topic: {data.topic}\n"
             f"Duration (minutes): {data.duration_minutes}\n\n"
-            f"Matched NCERT syllabus context\n"
+            f"NCERT syllabus context\n"
             f"{context_block}\n\n"
             "Instructions\n"
-            "- Build the lesson around the matched syllabus context above.\n"
-            "- Keep the output concise, classroom-ready, and chapter-specific.\n"
+            f"{match_instruction}"
             "- Use the exact section headings only.\n"
             "- No markdown like ## or **.\n"
-            "- Do not add Teacher Notes, References, Source, or any extra headings.\n"
             "- Each of these sections must begin with the timing in parentheses as the very first text in the section body: Opening, Main Teaching, Activity, Q&A, Closing.\n"
             f"- Use this time distribution exactly:\n{timing_block}\n\n"
             "Return in this exact plain-text shape:\n"
@@ -79,7 +88,8 @@ class PromptBuilder:
             "(<time>)\n"
             "<4 short questions>\n\n"
             "Closing\n"
-            "(<time>) <closing text>"
+            "(<time>)\n"
+            "<closing text>"
         )
 
         return PromptBundle(
@@ -93,6 +103,7 @@ class PromptBuilder:
                 "duration_minutes": data.duration_minutes,
                 "retrieved_snippets": data.retrieved_snippets,
                 "matched_syllabus_rows": data.matched_syllabus_rows,
+                "has_ncert_match": has_ncert_match,
                 "timing_map": timing_map,
             },
         )

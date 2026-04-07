@@ -10,6 +10,12 @@ from app.repositories.ncert_repository import NcertContentRepository
 
 logger = get_logger(__name__)
 
+_TOPIC_STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "in", "into", "is", "it",
+    "of", "on", "or", "the", "to", "with", "without", "about", "after", "before", "over", "under",
+    "this", "that", "these", "those", "lesson", "chapter", "topic", "class", "grade", "subject",
+}
+
 
 @dataclass(slots=True)
 class RetrievedChunk:
@@ -33,21 +39,30 @@ class RetrievedChunk:
     partial_matches: list[str]
 
     def as_prompt_snippet(self) -> str:
-        topic_label = (self.topic_name or self.topic or "Unknown topic").strip()
-        unit_label = (self.unit_name or self.chapter or "").strip()
-        summary = self._clean_text(self.topic_summary or self.content_chunk)
-        goal = self._clean_text(self.lesson_goal or "")
+        topic_label = self.topic_name or self.topic or "Unknown topic"
+        unit_label = self.unit_name or self.chapter or "Unknown unit"
+        summary = (self.topic_summary or self.content_chunk or "").strip()
+        goal = (self.lesson_goal or "").strip()
+        source = (self.source_reference or self.source_title or "").strip()
 
-        parts: list[str] = ["Matched NCERT entry"]
+        parts = [
+            f"Grade: {self.grade}",
+            f"Subject: {self.subject}",
+        ]
         if self.book:
-            parts.append(f"Book: {self.book.strip()}")
-        if unit_label and unit_label.casefold() != topic_label.casefold():
-            parts.append(f"Unit: {unit_label}")
-        parts.append(f"Chapter/Topic: {topic_label}")
-        if goal:
-            parts.append(f"Teaching focus: {goal}")
+            parts.append(f"Book: {self.book}")
+        parts.extend(
+            [
+                f"Unit: {unit_label}",
+                f"Topic: {topic_label}",
+            ]
+        )
         if summary:
-            parts.append(f"Useful chapter context: {summary}")
+            parts.append(f"Topic Summary: {summary}")
+        if goal:
+            parts.append(f"Lesson Goal: {goal}")
+        if source:
+            parts.append(f"Source: {source}")
         return "\n".join(parts)
 
     def as_inspectable_row(self) -> dict:
@@ -68,32 +83,6 @@ class RetrievedChunk:
             "partial_matches": self.partial_matches,
         }
 
-    def _clean_text(self, value: str) -> str:
-        text = value or ""
-        text = re.sub(r"https?://\S+", "", text)
-        text = re.sub(r"Chap\s*\d+\.indd\s*\d+", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"Reprint\s*\d{4}(?:-\d{2})?", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\b\d{1,2}/\d{1,2}/\d{4}\b", "", text)
-        text = re.sub(r"\b\d{1,2}:\d{2}:\d{2}\s*(?:AM|PM)?\b", "", text, flags=re.IGNORECASE)
-        text = text.replace("", " ")
-        text = re.sub(r"\s+", " ", text).strip(" -:\n\t")
-
-        sentences = re.split(r"(?<=[.!?])\s+", text)
-        cleaned_sentences: list[str] = []
-        for sentence in sentences:
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-            lower = sentence.casefold()
-            if lower.startswith(("keywords:", "book url:", "source:", "topic summary:")):
-                continue
-            cleaned_sentences.append(sentence)
-            if len(cleaned_sentences) == 4:
-                break
-
-        cleaned = " ".join(cleaned_sentences).strip() if cleaned_sentences else text[:500].strip()
-        return cleaned[:700].rstrip(" ,;:-")
-
 
 class NcertRetrievalService:
     def __init__(self, db: Session):
@@ -105,11 +94,24 @@ class NcertRetrievalService:
         rows = self.repo.find_by_grade_and_subject(grade=grade, subject=subject)
         topic_tokens = self._topic_tokens(topic)
 
+        # If the user topic has no meaningful tokens, do not try fuzzy chapter matching.
+        if not topic_tokens:
+            log_event(
+                logger,
+                "ncert_retrieval_no_meaningful_tokens",
+                grade=grade,
+                subject=subject,
+                topic=topic,
+                candidates=len(rows),
+            )
+            return []
+
         scored: list[RetrievedChunk] = []
         for row in rows:
-            score, exact_matches, partial_matches = self._score_row(row, topic_tokens)
-            if topic_tokens and score <= 0:
+            score, exact_matches, partial_matches = self._score_row(row, topic, topic_tokens)
+            if not self._is_confident_match(topic_tokens, exact_matches, partial_matches):
                 continue
+
             scored.append(
                 RetrievedChunk(
                     id=row.id,
@@ -151,6 +153,7 @@ class NcertRetrievalService:
             grade=grade,
             subject=subject,
             topic=topic,
+            topic_tokens=topic_tokens,
             candidates=len(rows),
             returned=[
                 {
@@ -166,10 +169,7 @@ class NcertRetrievalService:
         )
         return ranked
 
-    def _score_row(self, row: NcertContent, topic_tokens: list[str]) -> tuple[int, list[str], list[str]]:
-        if not topic_tokens:
-            return 1, [], []
-
+    def _score_row(self, row: NcertContent, topic: str, topic_tokens: list[str]) -> tuple[int, list[str], list[str]]:
         searchable = " ".join(
             filter(
                 None,
@@ -178,7 +178,6 @@ class NcertRetrievalService:
                     row.topic_name,
                     row.chapter,
                     row.book,
-                    row.book_url,
                     row.unit_name,
                     row.source_title,
                     row.source_reference,
@@ -189,11 +188,17 @@ class NcertRetrievalService:
                 ],
             )
         ).casefold()
+
         exact_token_set = set(re.findall(r"[a-z0-9-]+", searchable))
+        topic_phrase = " ".join(topic_tokens)
 
         exact_matches: list[str] = []
         partial_matches: list[str] = []
         score = 0
+
+        if topic_phrase and topic_phrase in searchable:
+            score += 200
+
         for token in topic_tokens:
             if token in exact_token_set:
                 exact_matches.append(token)
@@ -202,9 +207,30 @@ class NcertRetrievalService:
                 partial_matches.append(token)
                 score += 30
 
-        score += 5
         return score, exact_matches, partial_matches
 
+    def _is_confident_match(
+        self,
+        topic_tokens: list[str],
+        exact_matches: list[str],
+        partial_matches: list[str],
+    ) -> bool:
+        matched_count = len(set(exact_matches + partial_matches))
+        token_count = len(topic_tokens)
+
+        if token_count == 0:
+            return False
+
+        if token_count == 1:
+            return matched_count >= 1
+
+        # For multi-word topics, avoid returning unrelated chapters because of one weak token.
+        return len(exact_matches) >= 1 or matched_count >= 2
+
     def _topic_tokens(self, topic: str) -> list[str]:
-        tokens = re.findall(r"[a-z0-9-]+", topic.casefold())
-        return [token for token in tokens if len(token) > 1]
+        raw_tokens = re.findall(r"[a-z0-9-]+", topic.casefold())
+        return [
+            token
+            for token in raw_tokens
+            if len(token) > 2 and token not in _TOPIC_STOPWORDS
+        ]
