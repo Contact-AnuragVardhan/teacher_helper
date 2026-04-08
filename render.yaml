@@ -8,6 +8,9 @@ services:
     startCommand: bash start.sh
     healthCheckPath: /health
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.10"
+
       - key: DATABASE_URL
         sync: false
       - key: OPENAI_API_KEY
