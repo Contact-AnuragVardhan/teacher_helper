@@ -42,3 +42,13 @@ services:
         value: "5,11"
       - key: PROFILE_ALLOWED_SUBJECTS_BY_GRADE
         value: "5:English;11:English|Physics"
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_GRAPH_VERSION
+        value: "v23.0"
+      - key: WHATSAPP_API_TIMEOUT_SECONDS
+        value: "15"

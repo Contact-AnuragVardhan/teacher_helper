@@ -9,8 +9,6 @@ class Settings(BaseSettings):
     app_name: str = Field(default="Teacher Helper", validation_alias=AliasChoices("app_name", "APP_NAME"))
     database_url: str = Field(default="sqlite:///./teacher_helper.db", validation_alias=AliasChoices("database_url", "DATABASE_URL"))
 
-    # Keep deterministic as an explicit local override.
-    # For hosted LLMs, provider will be resolved from the model profile.
     llm_provider: Literal["deterministic", "openai", "google"] = Field(
         default="openai",
         validation_alias=AliasChoices("llm_provider", "LLM_PROVIDER"),
@@ -20,12 +18,20 @@ class Settings(BaseSettings):
     openai_base_url: str | None = Field(default=None, validation_alias=AliasChoices("openai_base_url", "OPENAI_BASE_URL"))
     openai_model: str = Field(default="gpt-4o-mini", validation_alias=AliasChoices("openai_model", "OPENAI_MODEL"))
 
-    # Optional future provider key. No new model tuning env vars are added.
     google_api_key: str | None = Field(default=None, validation_alias=AliasChoices("google_api_key", "GOOGLE_API_KEY"))
 
-    duplicate_lesson_policy: Literal["reject", "overwrite"] = Field(default="reject", validation_alias=AliasChoices("duplicate_lesson_policy", "DUPLICATE_LESSON_POLICY"))
-    session_timeout_minutes: int = Field(default=30, validation_alias=AliasChoices("session_timeout_minutes", "SESSION_TIMEOUT_MINUTES"))
-    supported_languages: str = Field(default="English", validation_alias=AliasChoices("supported_languages", "SUPPORTED_LANGUAGES"))
+    duplicate_lesson_policy: Literal["reject", "overwrite"] = Field(
+        default="reject",
+        validation_alias=AliasChoices("duplicate_lesson_policy", "DUPLICATE_LESSON_POLICY"),
+    )
+    session_timeout_minutes: int = Field(
+        default=30,
+        validation_alias=AliasChoices("session_timeout_minutes", "SESSION_TIMEOUT_MINUTES"),
+    )
+    supported_languages: str = Field(
+        default="English",
+        validation_alias=AliasChoices("supported_languages", "SUPPORTED_LANGUAGES"),
+    )
 
     profile_allowed_grades: str = Field(
         default="",
@@ -34,6 +40,27 @@ class Settings(BaseSettings):
     profile_allowed_subjects_by_grade: str = Field(
         default="",
         validation_alias=AliasChoices("profile_allowed_subjects_by_grade", "PROFILE_ALLOWED_SUBJECTS_BY_GRADE"),
+    )
+
+    whatsapp_access_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("whatsapp_access_token", "WHATSAPP_ACCESS_TOKEN"),
+    )
+    whatsapp_phone_number_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("whatsapp_phone_number_id", "WHATSAPP_PHONE_NUMBER_ID"),
+    )
+    whatsapp_verify_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("whatsapp_verify_token", "WHATSAPP_VERIFY_TOKEN"),
+    )
+    whatsapp_graph_version: str = Field(
+        default="v23.0",
+        validation_alias=AliasChoices("whatsapp_graph_version", "WHATSAPP_GRAPH_VERSION"),
+    )
+    whatsapp_api_timeout_seconds: float = Field(
+        default=15.0,
+        validation_alias=AliasChoices("whatsapp_api_timeout_seconds", "WHATSAPP_API_TIMEOUT_SECONDS"),
     )
 
     log_level: str = Field(default="INFO", validation_alias=AliasChoices("log_level", "LOG_LEVEL"))
@@ -60,6 +87,21 @@ class Settings(BaseSettings):
     def validate_timeout(cls, value: int) -> int:
         if value <= 0:
             raise ValueError("SESSION_TIMEOUT_MINUTES must be greater than 0.")
+        return value
+
+    @field_validator("whatsapp_graph_version")
+    @classmethod
+    def validate_graph_version(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("WHATSAPP_GRAPH_VERSION cannot be empty.")
+        return value
+
+    @field_validator("whatsapp_api_timeout_seconds")
+    @classmethod
+    def validate_whatsapp_timeout(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("WHATSAPP_API_TIMEOUT_SECONDS must be greater than 0.")
         return value
 
     @property
