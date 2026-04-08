@@ -10,21 +10,32 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
-      - key: RESET_DB_ON_START
-        value: "false"
-      - key: LOG_LEVEL
-        value: "INFO"
-      - key: ALLOW_ORIGINS
-        value: "*"
+      - key: OPENAI_API_KEY
+        sync: false
+
+      - key: OPENAI_BASE_URL
+        value: "https://api.openai.com/v1"
+      - key: OPENAI_MODEL
+        value: "gpt-5.4-mini"
       - key: LLM_PROVIDER
         value: "openai"
-      - key: OPENAI_MODEL
-        value: "gpt-4o-mini"
+      - key: RESET_DB_ON_START
+        value: "false"
       - key: DUPLICATE_LESSON_POLICY
         value: "reject"
       - key: SESSION_TIMEOUT_MINUTES
         value: "30"
       - key: SUPPORTED_LANGUAGES
         value: "English"
-      - key: OPENAI_API_KEY
-        sync: false
+      - key: LOG_LEVEL
+        value: "INFO"
+      - key: ALLOW_ORIGINS
+        value: "*"
+      - key: NCERT_CHUNK_SIZE
+        value: "650"
+      - key: NCERT_TOP_K
+        value: "3"
+      - key: PROFILE_ALLOWED_GRADES
+        value: "5,11"
+      - key: PROFILE_ALLOWED_SUBJECTS_BY_GRADE
+        value: "5:English;11:English|Physics"
