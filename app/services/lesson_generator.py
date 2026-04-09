@@ -198,6 +198,14 @@ class LessonGeneratorService:
                     skip_noise_block = True
                 continue
 
+            previous_non_empty = next((item for item in reversed(cleaned_lines) if item != ""), None)
+            if (
+                previous_non_empty is not None
+                and self._is_timing_line(normalized)
+                and previous_non_empty == normalized
+            ):
+                continue
+
             cleaned_lines.append(normalized)
 
         text = "\n".join(self._squash_blank_lines(cleaned_lines)).strip()
@@ -221,6 +229,15 @@ class LessonGeneratorService:
         value = re.sub(r"^__(.*?)__$", r"\1", value).strip()
         value = re.sub(r"^`(.*?)`$", r"\1", value).strip()
         return value
+
+    def _is_timing_line(self, text: str) -> bool:
+        return bool(
+            re.match(
+                r"^\(\s*\d+(?:\s*[–-]\s*\d+)?\s*min\s*\)$",
+                text.strip(),
+                re.IGNORECASE,
+            )
+        )
 
     def _squash_blank_lines(self, lines: list[str]) -> list[str]:
         output: list[str] = []
