@@ -75,16 +75,12 @@ class ConversationService:
     ) -> ConversationReply:
         return ConversationReply(reply=reply, current_state=state.value, outbound=outbound)
 
-    def _main_menu_text(self) -> str:
-        return (
-            "Main Menu:\n"
-            "1 → New Lesson\n"
-            "2 → All Lessons\n"
-            "3 → My Profile"
-        )
-
-    def _main_menu_with_prefix(self, prefix: str) -> str:
-        return f"{prefix}\n\n{self._main_menu_text()}"
+    def _main_menu_prompt(self, prefix: str) -> str:
+        prompt = "Please choose an option from the menu below."
+        clean_prefix = (prefix or "").strip()
+        if not clean_prefix:
+            return prompt
+        return f"{clean_prefix}\n\n{prompt}"
 
     def _format_numbered_titles(self, titles: list[str]) -> str:
         return "\n".join(f"{index}. {title}" for index, title in enumerate(titles, start=1))
@@ -158,7 +154,7 @@ class ConversationService:
 
     def _main_menu_reply(self, prefix: str) -> ConversationReply:
         return self._reply(
-            self._main_menu_with_prefix(prefix),
+            self._main_menu_prompt(prefix),
             ConversationState.MAIN_MENU,
             outbound={
                 "type": "list",
@@ -193,7 +189,6 @@ class ConversationService:
 
     def _all_lessons_interactive_reply(self, lesson_summaries: list[tuple[int, str]]) -> ConversationReply:
         rows = []
-        titles = [title for _, title in lesson_summaries]
         for lesson_id, title in lesson_summaries:
             item = {
                 "id": f"lesson_id:{lesson_id}",
@@ -205,8 +200,7 @@ class ConversationService:
 
         reply_text = (
             "All Lessons:\n"
-            f"{self._format_numbered_titles(titles)}\n\n"
-            "Choose a lesson from the list below."
+            "Please choose a lesson from the list below."
         )
 
         return self._reply(
@@ -597,7 +591,7 @@ class ConversationService:
 
         self.session_repo.reset_for_main_menu(session)
         return self._reply(
-            f"{lesson.lesson_text}\n\n{self._main_menu_text()}",
+            f"{lesson.lesson_text}\n\nPlease choose an option from the menu below.",
             ConversationState.MAIN_MENU,
             outbound={
                 "type": "list",
