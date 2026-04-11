@@ -11,6 +11,7 @@ from app.services.lesson_generation_provider import LessonGenerationProvider
 from app.services.llm_provider_openai import OpenAILessonGenerationProvider
 from app.services.ncert_retrieval_service import NcertRetrievalService
 from app.services.prompt_builder import PromptBuilder, PromptBuilderInput
+from app.utils.subject_normalization import normalize_subject
 
 logger = get_logger(__name__)
 
@@ -50,7 +51,7 @@ class LessonGeneratorService:
         subject: str | None = None,
     ) -> LessonGenerationResult:
         effective_grade = (grade or teacher.default_grade).strip()
-        effective_subject = (subject or teacher.default_subject).strip()
+        effective_subject = normalize_subject(subject or teacher.default_subject)
 
         log_event(
             logger,

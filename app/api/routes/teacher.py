@@ -7,6 +7,7 @@ from app.db.session import get_db
 from app.repositories.teacher_repository import TeacherRepository
 from app.schemas.teacher import TeacherResponse, TeacherUpsertRequest
 from app.utils.profile_validation import validate_profile_grade, validate_profile_subject
+from app.utils.subject_normalization import normalize_subject
 
 router = APIRouter(prefix="/teacher", tags=["teacher"])
 logger = get_logger(__name__)
@@ -50,8 +51,10 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
     if grade_error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=grade_error)
 
+    normalized_subject = normalize_subject(payload.default_subject)
+
     subject_error = validate_profile_subject(
-        payload.default_subject,
+        normalized_subject,
         payload.default_grade,
         settings,
     )
@@ -62,7 +65,7 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
         whatsapp_number=payload.whatsapp_number,
         teacher_name=payload.teacher_name.strip(),
         default_grade=payload.default_grade.strip(),
-        default_subject=payload.default_subject.strip(),
+        default_subject=normalized_subject,
         preferred_language=payload.preferred_language.strip(),
     )
     log_event(logger, "teacher_upsert_completed", whatsapp_number=payload.whatsapp_number, teacher_id=teacher.id)

@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.logging import get_logger, log_event
 from app.models.lesson_plan import LessonPlan
+from app.utils.subject_normalization import normalize_subject
 
 logger = get_logger(__name__)
 
@@ -98,7 +99,7 @@ class LessonRepository:
             lesson_name=lesson_name.strip(),
             topic=topic.strip(),
             grade=grade.strip(),
-            subject=subject.strip(),
+            subject=normalize_subject(subject),
             duration_minutes=duration_minutes,
             lesson_text=lesson_text,
         )
@@ -136,7 +137,7 @@ class LessonRepository:
     ) -> LessonPlan:
         lesson.topic = topic.strip()
         lesson.grade = grade.strip()
-        lesson.subject = subject.strip()
+        lesson.subject = normalize_subject(subject)
         lesson.duration_minutes = duration_minutes
         lesson.lesson_text = lesson_text
         self.db.add(lesson)

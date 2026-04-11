@@ -12,6 +12,7 @@ from app.schemas.lesson import (
     LessonSaveRequest,
 )
 from app.services.lesson_generator import LessonGeneratorService
+from app.utils.subject_normalization import normalize_subject
 
 router = APIRouter(prefix="/lesson", tags=["lesson"])
 logger = get_logger(__name__)
@@ -49,7 +50,7 @@ def generate_lesson(payload: LessonGenerateRequest, db: Session = Depends(get_db
         topic=payload.topic.strip(),
         duration_minutes=payload.duration_minutes,
         grade=payload.grade,
-        subject=payload.subject,
+        subject=normalize_subject(payload.subject) if payload.subject else None,
     )
     log_event(
         logger,
