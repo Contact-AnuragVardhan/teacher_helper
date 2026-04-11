@@ -80,6 +80,7 @@ async def handle_whatsapp_webhook(
             reply_text=result.reply,
             outbound=result.outbound,
         )
+        service.apply_post_send_updates(inbound_message["from_number"], result)
     except ValueError as exc:
         log_event(logger, "whatsapp_graph_send_skipped", error=str(exc))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
@@ -103,6 +104,7 @@ def _handle_mock_payload(payload: WhatsAppWebhookRequest, db: Session) -> JSONRe
     log_event(logger, "webhook_inbound_mock", from_number=payload.from_number, body=payload.body)
     service = ConversationService(db)
     result = service.handle_message(payload.from_number, payload.body)
+    service.apply_post_send_updates(payload.from_number, result)
     log_event(
         logger,
         "webhook_outbound_mock",

@@ -22,6 +22,8 @@ class ConversationReply:
     reply: str
     current_state: str
     outbound: dict | None = None
+    post_send_state: str | None = None
+    post_send_reset_main_menu: bool = False
 
 
 class ConversationService:
@@ -68,13 +70,48 @@ class ConversationService:
         )
         return result
 
+    def apply_post_send_updates(self, whatsapp_number: str, result: ConversationReply) -> None:
+        if not result.post_send_state and not result.post_send_reset_main_menu:
+            return
+
+        session, _ = self.session_repo.get_or_create(whatsapp_number)
+
+        if result.post_send_reset_main_menu:
+            self.session_repo.reset_for_main_menu(session)
+            log_event(
+                logger,
+                "conversation_post_send_transition",
+                whatsapp_number=whatsapp_number,
+                action="reset_for_main_menu",
+            )
+            return
+
+        if result.post_send_state and session.current_state != result.post_send_state:
+            session.current_state = result.post_send_state
+            self.session_repo.save(session)
+            log_event(
+                logger,
+                "conversation_post_send_transition",
+                whatsapp_number=whatsapp_number,
+                action="set_state",
+                to_state=result.post_send_state,
+            )
+
     def _reply(
         self,
         reply: str,
         state: ConversationState,
         outbound: dict | None = None,
+        post_send_state: ConversationState | None = None,
+        post_send_reset_main_menu: bool = False,
     ) -> ConversationReply:
-        return ConversationReply(reply=reply, current_state=state.value, outbound=outbound)
+        return ConversationReply(
+            reply=reply,
+            current_state=state.value,
+            outbound=outbound,
+            post_send_state=post_send_state.value if post_send_state else None,
+            post_send_reset_main_menu=post_send_reset_main_menu,
+        )
 
     def _main_menu_prompt(self, prefix: str) -> str:
         prompt = "Please tap one option below."
@@ -473,7 +510,6 @@ class ConversationService:
         )
         session.temp_duration_minutes = duration
         session.temp_generated_lesson = generation_result.lesson_text
-        session.current_state = ConversationState.NEW_LESSON_CONFIRM_SAVE.value
         self.session_repo.save(session)
 
         return self._save_menu_reply(generation_result.lesson_text)
