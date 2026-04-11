@@ -11,7 +11,7 @@ logger = get_logger(__name__)
 
 
 class WhatsAppMetaService:
-    MAX_TEXT_MESSAGE_LENGTH = 3500
+    MAX_TEXT_MESSAGE_LENGTH = 4000
 
     def __init__(self, settings: Settings):
         self.settings = settings
