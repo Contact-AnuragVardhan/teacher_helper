@@ -71,6 +71,18 @@ class LessonGeneratorService:
         snippet_texts = [item.as_prompt_snippet() for item in retrieved_chunks]
         inspectable_rows = [item.as_inspectable_row() for item in retrieved_chunks]
 
+        log_event(
+            logger,
+            "lesson_generation_effective_inputs",
+            topic=topic,
+            requested_grade=grade,
+            requested_subject=subject,
+            teacher_default_grade=teacher.default_grade,
+            teacher_default_subject=teacher.default_subject,
+            effective_grade=effective_grade,
+            effective_subject=effective_subject,
+        )
+
         prompt = self.prompt_builder.build(
             PromptBuilderInput(
                 grade=effective_grade,
