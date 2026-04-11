@@ -11,6 +11,8 @@ logger = get_logger(__name__)
 
 
 class WhatsAppMetaService:
+    MAX_TEXT_MESSAGE_LENGTH = 3500
+
     def __init__(self, settings: Settings):
         self.settings = settings
 
@@ -43,7 +45,21 @@ class WhatsAppMetaService:
             json=payload,
             timeout=self.settings.whatsapp_api_timeout_seconds,
         )
-        response.raise_for_status()
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            response_preview = response.text[:1000] if response.text else ""
+            log_event(
+                logger,
+                "whatsapp_graph_send_http_error",
+                to=to_number,
+                message_type=payload.get("type"),
+                status_code=response.status_code,
+                response_preview=response_preview,
+            )
+            raise
+
         result = response.json()
 
         log_event(
@@ -54,15 +70,79 @@ class WhatsAppMetaService:
         )
         return result
 
+    def _normalize_text_body(self, body: str) -> str:
+        return (body or "").replace("\r\n", "\n").strip()
+
+    def _split_text_chunks(self, body: str) -> list[str]:
+        normalized = self._normalize_text_body(body)
+        if not normalized:
+            return []
+
+        if len(normalized) <= self.MAX_TEXT_MESSAGE_LENGTH:
+            return [normalized]
+
+        chunks: list[str] = []
+        remaining = normalized
+
+        while remaining:
+            if len(remaining) <= self.MAX_TEXT_MESSAGE_LENGTH:
+                chunks.append(remaining.strip())
+                break
+
+            split_at = remaining.rfind("\n\n", 0, self.MAX_TEXT_MESSAGE_LENGTH)
+            if split_at == -1:
+                split_at = remaining.rfind("\n", 0, self.MAX_TEXT_MESSAGE_LENGTH)
+            if split_at == -1:
+                split_at = remaining.rfind(". ", 0, self.MAX_TEXT_MESSAGE_LENGTH)
+                if split_at != -1:
+                    split_at += 1
+            if split_at == -1:
+                split_at = remaining.rfind(" ", 0, self.MAX_TEXT_MESSAGE_LENGTH)
+            if split_at == -1:
+                split_at = self.MAX_TEXT_MESSAGE_LENGTH
+
+            chunk = remaining[:split_at].strip()
+            if not chunk:
+                chunk = remaining[: self.MAX_TEXT_MESSAGE_LENGTH].strip()
+                split_at = len(chunk)
+
+            chunks.append(chunk)
+            remaining = remaining[split_at:].lstrip()
+
+        return [chunk for chunk in chunks if chunk]
+
     def send_text_message(self, *, to_number: str, body: str) -> dict[str, Any]:
+        normalized_body = self._normalize_text_body(body)
+        if not normalized_body:
+            return {"status": "skipped", "reason": "empty_body"}
+
         payload = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
             "to": to_number,
             "type": "text",
-            "text": {"preview_url": False, "body": body},
+            "text": {"preview_url": False, "body": normalized_body},
         }
         return self._post(payload)
+
+    def send_text_messages(self, *, to_number: str, body: str) -> dict[str, Any]:
+        chunks = self._split_text_chunks(body)
+        if not chunks:
+            return {"status": "skipped", "reason": "empty_body", "chunk_count": 0}
+
+        last_result: dict[str, Any] = {}
+        for index, chunk in enumerate(chunks, start=1):
+            log_event(
+                logger,
+                "whatsapp_graph_send_text_chunk",
+                to=to_number,
+                chunk_index=index,
+                chunk_count=len(chunks),
+                chunk_length=len(chunk),
+            )
+            last_result = self.send_text_message(to_number=to_number, body=chunk)
+
+        return {"status": "sent", "chunk_count": len(chunks), "last_result": last_result}
 
     def send_reply_buttons(
         self,
@@ -161,13 +241,13 @@ class WhatsAppMetaService:
         outbound: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         if not outbound or outbound.get("type") == "text":
-            return self.send_text_message(to_number=to_number, body=reply_text)
+            return self.send_text_messages(to_number=to_number, body=reply_text)
 
         outbound_type = outbound.get("type")
 
         if outbound_type == "buttons":
             if reply_text and reply_text.strip():
-                self.send_text_message(to_number=to_number, body=reply_text)
+                self.send_text_messages(to_number=to_number, body=reply_text)
 
             return self.send_reply_buttons(
                 to_number=to_number,
@@ -179,7 +259,7 @@ class WhatsAppMetaService:
 
         if outbound_type == "list":
             if reply_text and reply_text.strip():
-                self.send_text_message(to_number=to_number, body=reply_text)
+                self.send_text_messages(to_number=to_number, body=reply_text)
 
             return self.send_list_message(
                 to_number=to_number,
@@ -191,4 +271,4 @@ class WhatsAppMetaService:
                 section_title=outbound.get("section_title", "Options"),
             )
 
-        return self.send_text_message(to_number=to_number, body=reply_text)
+        return self.send_text_messages(to_number=to_number, body=reply_text)
