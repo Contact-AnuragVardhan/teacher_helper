@@ -37,7 +37,7 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
             log_event(logger, "openai_response_empty", model=self.model)
             raise RuntimeError("LLM response was empty.")
 
-        needs_structure_retry = not self._is_response_well_structured(content)
+        needs_structure_retry = not self._is_response_well_structured(content, prompt)
         needs_quality_retry = self._looks_generic(content, prompt)
 
         if needs_structure_retry or needs_quality_retry:
@@ -50,12 +50,15 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
             )
             timing_map = prompt.metadata.get("timing_map", {})
             timing_hint = (
-                f"Opening -> ({timing_map.get('opening', 'required')})\n"
-                f"Main Teaching -> ({timing_map.get('main_teaching', 'required')})\n"
-                f"Activity -> ({timing_map.get('activity', 'required')})\n"
-                f"Q&A -> ({timing_map.get('qa', 'required')})\n"
-                f"Closing -> ({timing_map.get('closing', 'required')})"
+                f"1. Opening -> ({timing_map.get('opening', 'required')} min)\n"
+                f"2. Concept Teaching -> ({timing_map.get('concept_teaching', 'required')} min)\n"
+                f"3. Guided Practice -> ({timing_map.get('guided_practice', 'required')} min)\n"
+                f"4. Concept Reinforcement -> ({timing_map.get('concept_reinforcement', 'required')} min)\n"
+                f"5. Independent Practice -> ({timing_map.get('independent_practice', 'required')} min)\n"
+                f"6. Assessment / Check -> ({timing_map.get('assessment', 'required')} min)\n"
+                f"7. Closure -> ({timing_map.get('closure', 'required')} min)"
             )
+            has_ncert_match = bool(prompt.metadata.get("has_ncert_match"))
             revised = self._create_completion(
                 messages=[
                     {"role": "system", "content": prompt.system_prompt},
@@ -65,25 +68,32 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
                         "role": "user",
                         "content": (
                             "Revise your previous answer for Lesson Planning. "
-                            "Keep the same seven lesson sections and no extra commentary. "
-                            "Also keep the top summary block exactly like this before Lesson Title:\n"
+                            "Keep it smartphone-friendly with short bullets and clear blank lines between groups. "
+                            "This is a plan, not a long explanation. "
+                            "Use this exact summary block before Lesson Title:\n"
                             "Lesson Planning\n"
-                            f"Topic - {prompt.metadata.get('topic', '')}\n"
-                            f"Grade/Class - {prompt.metadata.get('grade', '')}\n"
-                            f"Subject - {prompt.metadata.get('subject', '')}\n"
-                            f"Duration - {prompt.metadata.get('duration_minutes', '')} min\n\n"
-                            "You MUST include timings exactly at the start of Opening, Main Teaching, Activity, Q&A, and Closing. "
+                            f"Topic: {prompt.metadata.get('topic', '')}\n"
+                            f"Grade/Class: {prompt.metadata.get('grade', '')}\n"
+                            f"Subject: {prompt.metadata.get('subject', '')}\n"
+                            f"Duration: {prompt.metadata.get('duration_minutes', '')} minutes\n\n"
+                            "Use these section headings in order: Lesson Title, Objectives, 1. Opening, 2. Concept Teaching, "
+                            "3. Guided Practice, 4. Concept Reinforcement, 5. Independent Practice, 6. Assessment / Check, 7. Closure, Teaching Tips. "
+                            "Use Learn More only when there is no NCERT match. "
+                            "Do not add Source because the app adds it separately. "
+                            "Keep the timing in the same heading line for sections 1 to 7. "
                             "Use this exact timing distribution:\n"
                             f"{timing_hint}\n\n"
                             "Make the lesson topic-specific and directly usable. "
-                            "Do not write vague lines such as 'Introduce the topic', 'Explain the concept', 'Use examples', "
-                            "'Give students an activity', or 'Review the key learning'. "
-                            "Instead, write the actual teaching content, actual examples, actual activity steps, and actual questions "
-                            "for the requested topic. "
-                            "Objective must be short separate lines. "
-                            "Main Teaching must be numbered points. "
-                            "Q&A must be exactly 4 numbered questions. "
-                            "Do not add markdown headings, Source, or any extra sections."
+                            "Avoid generic filler like 'Introduce the topic' or 'Use examples'. "
+                            "Write the actual concepts, actual teacher moves, actual student tasks, and actual quick checks. "
+                            "Objectives must be short bullet points. "
+                            "Teaching Tips must be short bullet points. "
+                            "No markdown tables. No long paragraphs. "
+                            + (
+                                "Do not include Learn More or any YouTube link because NCERT was matched."
+                                if has_ncert_match
+                                else "Include Learn More with exactly one relevant YouTube link."
+                            )
                         ),
                     },
                 ],
@@ -92,7 +102,7 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
             if revised:
                 content = revised
 
-        if not self._is_response_well_structured(content):
+        if not self._is_response_well_structured(content, prompt):
             log_event(logger, "openai_response_invalid_structure", model=self.model, content_preview=content[:500])
             raise RuntimeError("LLM response did not include the required lesson planning structure.")
 
@@ -108,129 +118,111 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
         content = response.choices[0].message.content if response.choices else None
         return (content or "").strip()
 
-    def _is_response_well_structured(self, text: str) -> bool:
+    def _is_response_well_structured(self, text: str, prompt: PromptBundle) -> bool:
         normalized = text.replace("\r\n", "\n").strip()
         if not normalized:
             return False
 
-        return (
-                self._has_top_summary_block(normalized)
-                and self._has_required_sections(normalized)
-                and self._has_required_timings(normalized)
-                and self._has_numbered_questions(normalized)
-        )
+        if not self._has_top_summary_block(normalized):
+            return False
+
+        if not self._has_required_sections(normalized):
+            return False
+
+        if not self._has_required_timings(normalized):
+            return False
+
+        if not self._has_list_like_content(normalized):
+            return False
+
+        if not self._has_learn_more_requirement(normalized, prompt):
+            return False
+
+        return True
 
     def _has_top_summary_block(self, text: str) -> bool:
-        normalized = text.replace("\r\n", "\n")
-
-        first_section_match = re.search(
-            r"(?im)^\s*(?:#+\s*)?(?:\*\*|__)?\s*"
-            r"(Lesson Title|Objective|Opening|Main Teaching|Activity|Q\s*&\s*A|Closing)"
-            r"\s*:?\s*(?:\*\*|__)?\s*$",
-            normalized,
-        )
-        summary_block = normalized[: first_section_match.start()] if first_section_match else normalized
-
-        checks = [
-            r"(?im)^\s*Lesson Planning\s*:?\s*$",
+        summary_checks = [
+            r"(?im)^\s*Lesson Planning\s*:?[ \t]*$",
             r"(?im)^\s*Topic\s*[-:]\s*.+$",
             r"(?im)^\s*Grade/Class\s*[-:]\s*.+$",
             r"(?im)^\s*Subject\s*[-:]\s*.+$",
             r"(?im)^\s*Duration\s*[-:]\s*.+$",
         ]
-        return all(re.search(pattern, summary_block) for pattern in checks)
+        return all(re.search(pattern, text) for pattern in summary_checks)
 
     def _has_required_sections(self, text: str) -> bool:
-        required_sections = [
-            "Lesson Title",
-            "Objective",
-            "Opening",
-            "Main Teaching",
-            "Activity",
-            "Q&A",
-            "Closing",
+        new_sections = [
+            r"Lesson Title",
+            r"Objectives?",
+            r"1\.\s*Opening",
+            r"2\.\s*Concept Teaching",
+            r"3\.\s*Guided Practice",
+            r"4\.\s*Concept Reinforcement",
+            r"5\.\s*Independent Practice",
+            r"6\.\s*Assessment\s*/\s*Check",
+            r"7\.\s*Closure",
+            r"Teaching Tips",
         ]
-        normalized = text.replace("\r\n", "\n")
+        legacy_sections = [
+            r"Lesson Title",
+            r"Objective",
+            r"Opening",
+            r"Main Teaching",
+            r"Activity",
+            r"Q\s*&\s*A",
+            r"Closing",
+        ]
 
-        for section in required_sections:
-            label = r"Q\s*&\s*A" if section == "Q&A" else re.escape(section)
-            pattern = (
-                rf"(?im)^\s*(?:#+\s*)?(?:\*\*|__)?\s*{label}\s*:?\s*(?:\*\*|__)?\s*$"
-            )
-            if not re.search(pattern, normalized):
+        if self._has_section_set(text, new_sections):
+            return True
+        return self._has_section_set(text, legacy_sections)
+
+    def _has_section_set(self, text: str, sections: list[str]) -> bool:
+        for section in sections:
+            pattern = rf"(?im)^\s*(?:#+\s*)?(?:\*\*|__)?\s*{section}\s*(?:\([^\n]+\))?\s*:?[ \t]*(?:\*\*|__)?$"
+            if not re.search(pattern, text):
                 return False
-
         return True
 
     def _has_required_timings(self, text: str) -> bool:
-        required_sections = ["Opening", "Main Teaching", "Activity", "Q&A", "Closing"]
-        normalized = text.replace("\r\n", "\n")
-
-        timing_hits = 0
-        for section in required_sections:
-            label = r"Q\s*&\s*A" if section == "Q&A" else re.escape(section)
-            pattern = (
-                rf"(?ims)^\s*(?:#+\s*)?(?:\*\*|__)?\s*{label}\s*:?\s*(?:\*\*|__)?\s*$"
-                rf"(?:\n\s*)*"
-                rf"\(?\s*\d+(?:\s*[–-]\s*\d+)?\s*min\s*\)?"
+        timing_line_count = len(
+            re.findall(
+                r"(?im)^\s*(?:[1-7]\.)?\s*[A-Za-z/& ]+\(\s*\d+(?:\s*[–-]\s*\d+)?\s*min\s*\)\s*:?[ \t]*$",
+                text,
             )
-            if re.search(pattern, normalized):
-                timing_hits += 1
-
-        return timing_hits == len(required_sections)
-
-    def _has_numbered_questions(self, text: str) -> bool:
-        qa_block = self._extract_section_block(text, "Q&A", "Closing")
-        if not qa_block:
-            return False
-
-        question_lines = re.findall(
-            r"(?im)^\s*(?:\d+\s*[\.\):-]|\(\d+\)|\d+\s+-)\s+.+$",
-            qa_block,
         )
-
-        if len(question_lines) >= 4:
+        if timing_line_count >= 5:
             return True
 
-        fallback_question_lines = [
-            line.strip()
-            for line in qa_block.splitlines()
-            if line.strip() and line.strip().endswith("?")
-        ]
-        return len(fallback_question_lines) >= 4
+        standalone_timing_count = len(
+            re.findall(r"(?im)^\s*\(?\s*\d+(?:\s*[–-]\s*\d+)?\s*min\s*\)?\s*$", text)
+        )
+        return standalone_timing_count >= 5
 
-    def _extract_section_block(self, text: str, start_section: str, end_section: str | None = None) -> str:
-        normalized = text.replace("\r\n", "\n")
+    def _has_list_like_content(self, text: str) -> bool:
+        bullet_lines = re.findall(r"(?im)^\s*[-•*]\s+.+$", text)
+        numbered_lines = re.findall(r"(?im)^\s*\d+\s*[\.)-]\s+.+$", text)
+        return len(bullet_lines) + len(numbered_lines) >= 8
 
-        start_label = r"Q\s*&\s*A" if start_section == "Q&A" else re.escape(start_section)
+    def _has_learn_more_requirement(self, text: str, prompt: PromptBundle) -> bool:
+        has_ncert_match = bool(prompt.metadata.get("has_ncert_match"))
+        has_learn_more = bool(re.search(r"(?im)^\s*Learn More\s*:?[ \t]*$", text))
+        has_youtube = "youtube.com" in text.casefold() or "youtu.be" in text.casefold()
 
-        if end_section:
-            end_label = r"Q\s*&\s*A" if end_section == "Q&A" else re.escape(end_section)
-            pattern = (
-                rf"(?ims)^\s*(?:#+\s*)?(?:\*\*|__)?\s*{start_label}\s*:?\s*(?:\*\*|__)?\s*$"
-                rf"(.*?)"
-                rf"(?=^\s*(?:#+\s*)?(?:\*\*|__)?\s*{end_label}\s*:?\s*(?:\*\*|__)?\s*$)"
-            )
-        else:
-            pattern = (
-                rf"(?ims)^\s*(?:#+\s*)?(?:\*\*|__)?\s*{start_label}\s*:?\s*(?:\*\*|__)?\s*$"
-                rf"(.*)$"
-            )
-
-        match = re.search(pattern, normalized, flags=re.MULTILINE)
-        return match.group(1).strip() if match else ""
+        if has_ncert_match:
+            return not has_youtube
+        return has_learn_more and has_youtube
 
     def _looks_generic(self, text: str, prompt: PromptBundle) -> bool:
         normalized = text.casefold()
         generic_phrases = [
-            "introduce the topic in simple",
-            "explain the most important concept",
-            "use one or two relevant examples",
-            "give students a short individual, pair, or group activity",
-            "what is the main idea of today",
-            "what is one important point you learned",
-            "review the key learning in short points",
+            "introduce the topic",
+            "explain the concept",
+            "use examples",
+            "review the lesson",
             "ask students to share one takeaway",
+            "give students a short activity",
+            "link the topic to prior knowledge",
         ]
         if any(phrase in normalized for phrase in generic_phrases):
             return True

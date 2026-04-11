@@ -1,3 +1,5 @@
+import re
+
 from app.core.logging import get_logger, log_event
 from app.services.lesson_generation_provider import LessonGenerationProvider, PromptBundle
 
@@ -14,100 +16,167 @@ class DeterministicTemplateProvider(LessonGenerationProvider):
         subject = str(prompt.metadata.get("subject", "the subject")).strip()
         duration = int(prompt.metadata.get("duration_minutes", 35))
         preferred_language = str(prompt.metadata.get("preferred_language", "English")).strip().casefold()
+        has_ncert_match = bool(prompt.metadata.get("has_ncert_match"))
 
-        opening, main_teaching, activity, qa, closing = self._allocate_minutes(duration)
-
+        timings = self._allocate_timings(duration)
         if preferred_language == "hinglish":
-            return (
-                f"Lesson Planning\n"
-                f"Topic - {topic}\n"
-                f"Grade/Class - {grade}\n"
-                f"Subject - {subject}\n"
-                f"Duration - {duration} min\n\n"
-                f"Lesson Title\n"
-                f"{self._title_case(topic)}\n\n"
-                f"Objective\n"
-                f"Students {topic} ka basic idea samjhenge.\n"
-                f"Students important points ko simple examples ke saath explain kar paayenge.\n"
-                f"Students class discussion aur activity ke through concept apply karenge.\n\n"
-                f"Opening\n"
-                f"({opening} min)\n"
-                f"Hook: Topic se related ek short warm-up question poochiye.\n"
-                f"Connect: Students ke prior knowledge ya daily life se topic ko jodiye.\n"
-                f"Focus: Aaj ke lesson ka clear learning focus batayiye.\n\n"
-                f"Main Teaching\n"
-                f"({main_teaching} min)\n"
-                f"1. Topic ka basic introduction simple Hinglish mein dijiye.\n"
-                f"2. Important concept ya facts ko step by step samjhaiye.\n"
-                f"3. Ek ya do relevant examples dijiye taaki understanding clear ho.\n"
-                f"4. Topic ko chapter focus ya classroom learning goal se connect kijiye.\n"
-                f"5. Beech-beech mein short oral questions poochkar comprehension check kijiye.\n\n"
-                f"Activity\n"
-                f"({activity} min)\n"
-                f"Task: Students ko individual, pair, ya group-based short task dijiye.\n"
-                f"Steps: Unse main idea identify karne, likhne, ya discuss karne ko kahiye.\n"
-                f"Share: 2-3 students ya pairs apne responses class ke saath share karein.\n\n"
-                f"Q&A\n"
-                f"({qa} min)\n"
-                f"1. Aaj ke lesson ka main idea kya tha?\n"
-                f"2. Is topic ka ek important point batao.\n"
-                f"3. Kaunsa example ya explanation aapko sabse helpful laga?\n"
-                f"4. Is topic ko aap real life ya next lesson se kaise connect karoge?\n\n"
-                f"Closing\n"
-                f"({closing} min)\n"
-                f"Recap: Key learning ko short points mein revise kijiye.\n"
-                f"Reflection: Students se ek takeaway ya ek sentence response bulwaiye."
+            return self._build_hinglish(topic, grade, subject, duration, timings, has_ncert_match)
+        return self._build_english(topic, grade, subject, duration, timings, has_ncert_match)
+
+    def _build_english(self, topic: str, grade: str, subject: str, duration: int, timings: dict[str, int], has_ncert_match: bool) -> str:
+        lines = [
+            "Lesson Planning",
+            f"Topic: {topic}",
+            f"Grade/Class: {grade}",
+            f"Subject: {subject}",
+            f"Duration: {duration} minutes",
+            "",
+            "Lesson Title",
+            f"- {self._title_case(topic)}",
+            "",
+            "Objectives",
+            f"- Understand the core idea of {topic}.",
+            f"- Explain key points from {topic} in simple words.",
+            f"- Apply the learning from {topic} in class discussion or practice.",
+            "",
+            f"1. Opening ({timings['opening']} min)",
+            f"- Hook Question: What do you already know about {topic}?",
+            f"- Teacher Move: Activate prior knowledge with one quick classroom example.",
+            f"- Quick Pair Prompt: Share one idea or observation related to {topic}.",
+            "",
+            f"2. Concept Teaching ({timings['concept_teaching']} min)",
+            f"- Introduce the main concept in simple, grade-appropriate language.",
+            f"- Teach 2 to 3 key ideas connected to {topic}.",
+            f"- Use one short example or demonstration to make the concept concrete.",
+            "",
+            f"3. Guided Practice ({timings['guided_practice']} min)",
+            "- Activity: Short pair or whole-class guided task.",
+            f"- Student Action: Observe, discuss, sort, solve, or respond using the lesson idea.",
+            "- Teacher Check: Ask short questions while students are working.",
+            "",
+            f"4. Concept Reinforcement ({timings['concept_reinforcement']} min)",
+            "- Revisit the most important concept in 2 short bullets.",
+            "- Compare one correct idea with one common confusion.",
+            "",
+            f"5. Independent Practice ({timings['independent_practice']} min)",
+            "- Ask students to answer 2 to 3 short written or oral prompts.",
+            f"- Keep the task focused on the main learning from {topic}.",
+            "",
+            f"6. Assessment / Check ({timings['assessment']} min)",
+            "- Quick Check: What is the main idea?",
+            "- Quick Check: What is one important term or fact?",
+            "- Quick Check: How would you explain this to a classmate?",
+            "",
+            f"7. Closure ({timings['closure']} min)",
+            f"- Wrap-Up: Summarize the key takeaway from {topic}.",
+            "- Exit Ticket: One new thing I learned today is _____.",
+            "",
+            "Teaching Tips",
+            "- Keep explanations short and check understanding often.",
+            "- Use board work, body movement, or a quick demo instead of long theory.",
+            "- Treat this as a classroom plan, then expand verbally while teaching.",
+        ]
+
+        if not has_ncert_match:
+            lines.extend(
+                [
+                    "",
+                    "Learn More",
+                    f"- https://www.youtube.com/results?search_query={self._youtube_query(topic, subject)}",
+                ]
             )
 
-        return (
-            f"Lesson Planning\n"
-            f"Topic - {topic}\n"
-            f"Grade/Class - {grade}\n"
-            f"Subject - {subject}\n"
-            f"Duration - {duration} min\n\n"
-            f"Lesson Title\n"
-            f"{self._title_case(topic)}\n\n"
-            f"Objective\n"
-            f"Students will understand the basic idea of {topic}.\n"
-            f"Students will explain important points using simple classroom examples.\n"
-            f"Students will apply the concept through discussion and a short activity.\n\n"
-            f"Opening\n"
-            f"({opening} min)\n"
-            f"Hook: Ask a short warm-up question related to the topic.\n"
-            f"Connect: Link the topic to prior knowledge or a familiar example.\n"
-            f"Focus: State the learning goal for the period clearly.\n\n"
-            f"Main Teaching\n"
-            f"({main_teaching} min)\n"
-            f"1. Introduce the topic in simple, grade-appropriate language.\n"
-            f"2. Explain the most important concept or facts step by step.\n"
-            f"3. Use one or two relevant examples to make the idea clear.\n"
-            f"4. Connect the topic to the chapter focus or classroom objective.\n"
-            f"5. Check understanding with brief oral questions during teaching.\n\n"
-            f"Activity\n"
-            f"({activity} min)\n"
-            f"Task: Give students a short individual, pair, or group activity.\n"
-            f"Steps: Ask them to identify, discuss, write, or solve based on the main idea.\n"
-            f"Share: Invite a few students or pairs to present their responses.\n\n"
-            f"Q&A\n"
-            f"({qa} min)\n"
-            f"1. What is the main idea of today’s lesson?\n"
-            f"2. What is one important point you learned?\n"
-            f"3. Which example or explanation helped you most?\n"
-            f"4. How can you connect this topic to real life or the next lesson?\n\n"
-            f"Closing\n"
-            f"({closing} min)\n"
-            f"Recap: Review the key learning in short points.\n"
-            f"Reflection: Ask students to share one takeaway from the lesson."
-        )
+        return "\n".join(lines)
 
-    def _allocate_minutes(self, duration: int) -> tuple[int, int, int, int, int]:
-        opening = max(4, round(duration * 0.12))
-        main_teaching = max(15, round(duration * 0.50))
-        activity = max(5, round(duration * 0.16))
-        qa = max(4, round(duration * 0.12))
-        used = opening + main_teaching + activity + qa
-        closing = max(2, duration - used)
-        return opening, main_teaching, activity, qa, closing
+    def _build_hinglish(self, topic: str, grade: str, subject: str, duration: int, timings: dict[str, int], has_ncert_match: bool) -> str:
+        lines = [
+            "Lesson Planning",
+            f"Topic: {topic}",
+            f"Grade/Class: {grade}",
+            f"Subject: {subject}",
+            f"Duration: {duration} minutes",
+            "",
+            "Lesson Title",
+            f"- {self._title_case(topic)}",
+            "",
+            "Objectives",
+            f"- {topic} ka basic idea samajhna.",
+            f"- {topic} ke key points simple words mein batana.",
+            f"- Class discussion ya practice mein concept apply karna.",
+            "",
+            f"1. Opening ({timings['opening']} min)",
+            f"- Hook Question: {topic} ke baare mein tum pehle se kya jaante ho?",
+            "- Teacher Move: Ek quick example se prior knowledge activate karo.",
+            "- Quick Pair Prompt: Pair mein ek idea share karo.",
+            "",
+            f"2. Concept Teaching ({timings['concept_teaching']} min)",
+            "- Main concept ko simple Hinglish mein samjhao.",
+            f"- {topic} se jude 2 ya 3 important points lo.",
+            "- Ek short example ya demo use karo.",
+            "",
+            f"3. Guided Practice ({timings['guided_practice']} min)",
+            "- Activity: Short pair ya whole-class task.",
+            "- Student Action: Observe, discuss, likho, ya answer do.",
+            "- Teacher Check: Kaam ke dauran short questions poochho.",
+            "",
+            f"4. Concept Reinforcement ({timings['concept_reinforcement']} min)",
+            "- Sabse important idea ko 2 short bullets mein repeat karo.",
+            "- Ek common confusion ko correct answer se compare karo.",
+            "",
+            f"5. Independent Practice ({timings['independent_practice']} min)",
+            "- 2 ya 3 short written/oral responses lo.",
+            f"- Task ko {topic} ke main learning point par rakho.",
+            "",
+            f"6. Assessment / Check ({timings['assessment']} min)",
+            "- Quick Check: Main idea kya hai?",
+            "- Quick Check: Ek important term ya fact batao.",
+            "- Quick Check: Is concept ko friend ko kaise samjhaoge?",
+            "",
+            f"7. Closure ({timings['closure']} min)",
+            f"- Wrap-Up: {topic} ka key takeaway bolo.",
+            "- Exit Ticket: Aaj maine ek nayi baat seekhi _____.",
+            "",
+            "Teaching Tips",
+            "- Explanation short rakho aur beech-beech mein check karo.",
+            "- Long theory ke bajaay board, movement, ya quick demo use karo.",
+            "- Isko teaching plan samjho; details class mein orally expand karo.",
+        ]
+
+        if not has_ncert_match:
+            lines.extend(
+                [
+                    "",
+                    "Learn More",
+                    f"- https://www.youtube.com/results?search_query={self._youtube_query(topic, subject)}",
+                ]
+            )
+
+        return "\n".join(lines)
+
+    def _allocate_timings(self, duration: int) -> dict[str, int]:
+        total = max(20, int(duration))
+        opening = max(4, round(total * 0.12))
+        concept_teaching = max(8, round(total * 0.28))
+        guided_practice = max(5, round(total * 0.20))
+        concept_reinforcement = max(4, round(total * 0.14))
+        independent_practice = max(4, round(total * 0.12))
+        assessment = max(3, round(total * 0.08))
+        used = opening + concept_teaching + guided_practice + concept_reinforcement + independent_practice + assessment
+        closure = max(2, total - used)
+        return {
+            "opening": opening,
+            "concept_teaching": concept_teaching,
+            "guided_practice": guided_practice,
+            "concept_reinforcement": concept_reinforcement,
+            "independent_practice": independent_practice,
+            "assessment": assessment,
+            "closure": closure,
+        }
+
+    def _youtube_query(self, topic: str, subject: str) -> str:
+        query = f"{topic} {subject} lesson for students"
+        query = re.sub(r"\s+", "+", query.strip())
+        return query
 
     def _title_case(self, value: str) -> str:
         small_words = {"a", "an", "and", "as", "at", "but", "by", "for", "from", "in", "nor", "of", "on", "or", "the", "to", "vs", "via", "with"}
