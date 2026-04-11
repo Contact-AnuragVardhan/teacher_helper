@@ -48,6 +48,7 @@ class PromptBuilder:
         )
 
         language_instruction = self._language_instruction(data.preferred_language)
+        content_depth_instruction = self._content_depth_instruction(data.subject)
 
         system_prompt = (
             "You are a lesson planning assistant for Indian K-12 teachers. "
@@ -60,12 +61,16 @@ class PromptBuilder:
             "The sections Opening, Main Teaching, Activity, Q&A, and Closing MUST each start with a timing in parentheses "
             "on the first line of the section body, for example '(5 min)' or '(5–7 min)'. "
             "Do not omit timings. Do not add Source, Notes, Markdown headings, bullets before section titles, or extra sections. "
+            "Every section must be topic-specific, classroom-usable, and content-rich for the exact requested topic. "
+            "Do not write generic placeholders or meta-instructions such as 'Introduce the topic', 'Explain the concept', "
+            "'Give students an activity', 'Ask a warm-up question', or 'Review the key learning'. "
+            "Write the actual lesson content the teacher can directly use. "
             f"{language_instruction}"
         )
 
         match_instruction = (
             "- Build the lesson around the matched NCERT syllabus context above.\n"
-            "- Keep the output concise, classroom-ready, and chapter-specific.\n"
+            "- Keep the output classroom-ready and chapter-specific.\n"
             if has_ncert_match
             else
             "- No NCERT syllabus match was found. Build the lesson for the requested topic itself.\n"
@@ -94,14 +99,16 @@ class PromptBuilder:
             "- No markdown like ## or **.\n"
             "- Do not add any other header above or below the summary block.\n"
             "- Each of these sections must begin with the timing in parentheses as the very first text in the section body: Opening, Main Teaching, Activity, Q&A, Closing.\n"
-            "- Keep the outer lesson sections unchanged, but format the inside of each section in a cleaner, more structured way.\n"
-            "- Objective must be 3 to 5 short learning outcome lines, each on its own line.\n"
-            "- Opening should use short labeled lines such as Hook, Connect, and Focus.\n"
-            "- Main Teaching should use 4 to 6 short numbered teaching points, not one long paragraph.\n"
-            "- Activity should use short labeled lines such as Task, Steps, and Share.\n"
-            "- Q&A must contain exactly 4 short numbered questions on separate lines.\n"
-            "- Closing should use short labeled lines such as Recap and Reflection.\n"
+            "- Keep the outer lesson sections unchanged, but make the inside of each section concrete and usable.\n"
+            "- Objective must be 3 to 5 separate outcome lines that mention specific knowledge or skills from this topic.\n"
+            "- Opening should include a real hook, a real prior-knowledge connection, and a real lesson focus for this exact topic.\n"
+            "- Main Teaching should use 5 to 7 numbered points with actual concept teaching, not generic pedagogy sentences.\n"
+            "- Activity should be a concrete activity for this exact topic with clear student actions.\n"
+            "- Q&A must contain exactly 4 short numbered questions on this exact topic, not generic reflection questions.\n"
+            "- Closing should briefly recap the actual content taught and end with a relevant reflection.\n"
+            f"- {content_depth_instruction}\n"
             f"- {language_instruction}\n"
+            "- Avoid vague lines such as 'Explain important points', 'Use examples', 'Discuss the main idea', or 'Connect to real life'. Replace them with the actual points, examples, and questions.\n"
             f"- Use this time distribution exactly:\n{timing_block}\n\n"
             "Return in this exact plain-text shape:\n"
             "Lesson Planning\n"
@@ -110,35 +117,36 @@ class PromptBuilder:
             "Subject - <subject>\n"
             "Duration - <duration> min\n\n"
             "Lesson Title\n"
-            "<title>\n\n"
+            "<actual topic-specific title>\n\n"
             "Objective\n"
-            "<3 to 5 short outcome lines>\n\n"
+            "<3 to 5 actual topic-specific outcome lines>\n\n"
             "Opening\n"
             "(<time>)\n"
-            "Hook: <short line>\n"
-            "Connect: <short line>\n"
-            "Focus: <short line>\n\n"
+            "Hook: <actual hook for this topic>\n"
+            "Connect: <actual prior-knowledge bridge for this topic>\n"
+            "Focus: <actual lesson focus for this topic>\n\n"
             "Main Teaching\n"
             "(<time>)\n"
-            "1. <short point>\n"
-            "2. <short point>\n"
-            "3. <short point>\n"
-            "4. <short point>\n\n"
+            "1. <actual topic-specific teaching point>\n"
+            "2. <actual topic-specific teaching point>\n"
+            "3. <actual topic-specific teaching point>\n"
+            "4. <actual topic-specific teaching point>\n"
+            "5. <actual topic-specific teaching point>\n\n"
             "Activity\n"
             "(<time>)\n"
-            "Task: <short line>\n"
-            "Steps: <short line>\n"
-            "Share: <short line>\n\n"
+            "Task: <actual task for this topic>\n"
+            "Steps: <actual student steps for this topic>\n"
+            "Share: <actual sharing/check-for-understanding step>\n\n"
             "Q&A\n"
             "(<time>)\n"
-            "1. <question>\n"
-            "2. <question>\n"
-            "3. <question>\n"
-            "4. <question>\n\n"
+            "1. <actual topic-specific question>\n"
+            "2. <actual topic-specific question>\n"
+            "3. <actual topic-specific question>\n"
+            "4. <actual topic-specific question>\n\n"
             "Closing\n"
             "(<time>)\n"
-            "Recap: <short line>\n"
-            "Reflection: <short line>"
+            "Recap: <actual recap of this topic>\n"
+            "Reflection: <actual reflection tied to this topic>"
         )
 
         return PromptBundle(
@@ -166,6 +174,29 @@ class PromptBuilder:
                 "Use natural teacher-friendly Indian classroom wording with a light Hindi-English mix."
             )
         return "Write the lesson in clear, simple English."
+
+    def _content_depth_instruction(self, subject: str) -> str:
+        subject_key = subject.strip().casefold()
+        if subject_key in {"physics", "science"}:
+            return (
+                "Use scientifically correct, grade-appropriate content. Include the actual concept names, "
+                "simple cause-and-effect explanation, and at least one concrete example, observation, or demo idea."
+            )
+        if subject_key in {"mathematics", "maths", "math"}:
+            return (
+                "Include the actual method, worked idea, or reasoning steps students should learn, plus one concrete example."
+            )
+        if subject_key in {"social science", "history", "geography", "political science", "economics", "civics"}:
+            return (
+                "Include the actual people, places, events, or concepts relevant to the topic in age-appropriate detail."
+            )
+        if subject_key in {"english", "hindi", "urdu", "language"}:
+            return (
+                "Include the actual comprehension, vocabulary, language, or text-specific focus relevant to the topic."
+            )
+        return (
+            "Include the actual facts, concepts, and examples needed to teach this topic well instead of generic teaching directions."
+        )
 
     def _allocate_timings(self, duration_minutes: int) -> dict[str, str]:
         total = max(10, int(duration_minutes))
