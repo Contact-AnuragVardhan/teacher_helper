@@ -11,6 +11,7 @@ PHONE = "15550001111"
 def test_meta_all_lessons_with_10_or_less_sends_interactive_list(mock_post, client, monkeypatch):
     monkeypatch.setenv("WHATSAPP_ACCESS_TOKEN", "access-token")
     monkeypatch.setenv("WHATSAPP_PHONE_NUMBER_ID", "123456789")
+    monkeypatch.setenv("SUPPORTED_LANGUAGES", "English,Hinglish")
     get_settings.cache_clear()
 
     mock_response = Mock()
@@ -34,10 +35,13 @@ def test_meta_all_lessons_with_10_or_less_sends_interactive_list(mock_post, clie
 
     mock_post.reset_mock()
 
-    client.post("/webhook/whatsapp", json={
-        "object": "whatsapp_business_account",
-        "entry": [{"changes": [{"value": {"messages": [{"from": PHONE, "type": "text", "text": {"body": "2"}}]}}]}],
-    })
+    client.post(
+        "/webhook/whatsapp",
+        json={
+            "object": "whatsapp_business_account",
+            "entry": [{"changes": [{"value": {"messages": [{"from": PHONE, "type": "text", "text": {"body": "2"}}]}}]}],
+        },
+    )
 
     args, kwargs = mock_post.call_args
 

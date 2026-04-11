@@ -29,7 +29,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("session_timeout_minutes", "SESSION_TIMEOUT_MINUTES"),
     )
     supported_languages: str = Field(
-        default="English",
+        default="English,Hinglish",
         validation_alias=AliasChoices("supported_languages", "SUPPORTED_LANGUAGES"),
     )
 

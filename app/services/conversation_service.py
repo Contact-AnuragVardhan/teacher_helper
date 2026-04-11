@@ -104,11 +104,57 @@ class ConversationService:
             "start",
         }
 
+    def _is_keep_value(self, text: str) -> bool:
+        return normalize_choice(text) in {"same", "skip", "keep", "current"}
+
+    def _language_options_text(self) -> str:
+        languages = self.settings.supported_languages_list or ["English"]
+        if len(languages) == 1:
+            return languages[0]
+        return ", ".join(languages)
+
     def _new_lesson_grade_prompt(self) -> str:
-        return "Please enter the grade/class for this lesson."
+        return "Please enter the grade/class for this lesson. Example: 1, 2, 3"
 
     def _new_lesson_subject_prompt(self) -> str:
-        return "Please enter the subject for this lesson."
+        return "Please enter the subject for this lesson. Example: English"
+
+    def _profile_language_prompt(self) -> str:
+        return f"Please enter preferred language. Example: {self._language_options_text()}"
+
+    def _profile_update_summary(self, teacher) -> str:
+        return (
+            "Current profile:\n"
+            f"Name: {teacher.teacher_name}\n"
+            f"Grade: {teacher.default_grade}\n"
+            f"Subject: {teacher.default_subject}\n"
+            f"Language: {teacher.preferred_language}"
+        )
+
+    def _profile_name_edit_prompt(self, teacher) -> str:
+        return (
+            f"{messages.PROFILE_UPDATED}\n\n"
+            f"{self._profile_update_summary(teacher)}\n\n"
+            "Reply with your name, or send 'same' to keep the current value."
+        )
+
+    def _profile_grade_edit_prompt(self, teacher) -> str:
+        return (
+            f"Current grade/class: {teacher.default_grade}\n"
+            "Reply with the new grade/class, or send 'same' to keep it. Example: 1, 2, 3"
+        )
+
+    def _profile_subject_edit_prompt(self, teacher) -> str:
+        return (
+            f"Current subject: {teacher.default_subject}\n"
+            "Reply with the new subject, or send 'same' to keep it. Example: English"
+        )
+
+    def _profile_language_edit_prompt(self, teacher) -> str:
+        return (
+            f"Current language: {teacher.preferred_language}\n"
+            f"Reply with the new language, or send 'same' to keep it. Example: {self._language_options_text()}"
+        )
 
     def _main_menu_reply(self, prefix: str) -> ConversationReply:
         return self._reply(
@@ -227,74 +273,128 @@ class ConversationService:
             return self._all_lessons_fallback_reply(titles)
 
         if choice in {"3", "my profile", "menu_my_profile"}:
-            session.current_state = ConversationState.PROFILE_NAME.value
-            self.session_repo.clear_temp_profile(session)
             teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-            prompt = messages.PROFILE_UPDATED if teacher else messages.PROFILE_START
-            return self._reply(prompt, ConversationState.PROFILE_NAME)
+            self.session_repo.clear_temp_profile(session)
+            session.current_state = ConversationState.PROFILE_NAME.value
+
+            if teacher:
+                session.temp_profile_name = teacher.teacher_name
+                session.temp_profile_grade = teacher.default_grade
+                session.temp_profile_subject = teacher.default_subject
+                self.session_repo.save(session)
+                return self._reply(self._profile_name_edit_prompt(teacher), ConversationState.PROFILE_NAME)
+
+            self.session_repo.save(session)
+            return self._reply(messages.PROFILE_START, ConversationState.PROFILE_NAME)
 
         return self._main_menu_reply(
             "I can help with creating a new lesson, viewing all saved lessons, or updating your profile. Please choose one of the options below."
         )
 
     def _handle_profile_name(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
         if not text:
+            if teacher:
+                return self._reply(self._profile_name_edit_prompt(teacher), ConversationState.PROFILE_NAME)
             return self._reply(messages.PROFILE_NAME_PROMPT, ConversationState.PROFILE_NAME)
 
-        session.temp_profile_name = text
+        if teacher and self._is_keep_value(text):
+            session.temp_profile_name = teacher.teacher_name
+        else:
+            session.temp_profile_name = text
+
         session.current_state = ConversationState.PROFILE_GRADE.value
         self.session_repo.save(session)
+
+        if teacher:
+            return self._reply(self._profile_grade_edit_prompt(teacher), ConversationState.PROFILE_GRADE)
         return self._reply(messages.PROFILE_GRADE_PROMPT, ConversationState.PROFILE_GRADE)
 
     def _handle_profile_grade(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
         if not text:
+            if teacher:
+                return self._reply(self._profile_grade_edit_prompt(teacher), ConversationState.PROFILE_GRADE)
             return self._reply(messages.PROFILE_GRADE_PROMPT, ConversationState.PROFILE_GRADE)
 
-        grade_error = validate_profile_grade(text, self.settings)
-        if grade_error:
-            log_event(logger, "validation_failure", field="default_grade", value=text)
-            return self._reply(
-                f"{grade_error}\n{messages.PROFILE_GRADE_PROMPT}",
-                ConversationState.PROFILE_GRADE,
-            )
+        if teacher and self._is_keep_value(text):
+            grade_value = teacher.default_grade
+        else:
+            grade_value = text.strip()
+            grade_error = validate_profile_grade(grade_value, self.settings)
+            if grade_error:
+                log_event(logger, "validation_failure", field="default_grade", value=text)
+                prompt = self._profile_grade_edit_prompt(teacher) if teacher else messages.PROFILE_GRADE_PROMPT
+                return self._reply(
+                    f"{grade_error}\n{prompt}",
+                    ConversationState.PROFILE_GRADE,
+                )
 
-        session.temp_profile_grade = text.strip()
+        session.temp_profile_grade = grade_value
         session.current_state = ConversationState.PROFILE_SUBJECT.value
         self.session_repo.save(session)
+
+        if teacher:
+            return self._reply(self._profile_subject_edit_prompt(teacher), ConversationState.PROFILE_SUBJECT)
         return self._reply(messages.PROFILE_SUBJECT_PROMPT, ConversationState.PROFILE_SUBJECT)
 
     def _handle_profile_subject(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
         if not text:
+            if teacher:
+                return self._reply(self._profile_subject_edit_prompt(teacher), ConversationState.PROFILE_SUBJECT)
             return self._reply(messages.PROFILE_SUBJECT_PROMPT, ConversationState.PROFILE_SUBJECT)
 
-        subject_error = validate_profile_subject(
-            text,
-            session.temp_profile_grade or "",
-            self.settings,
-        )
-        if subject_error:
-            log_event(logger, "validation_failure", field="default_subject", value=text)
-            return self._reply(
-                f"{subject_error}\n{messages.PROFILE_SUBJECT_PROMPT}",
-                ConversationState.PROFILE_SUBJECT,
+        if teacher and self._is_keep_value(text):
+            subject_value = teacher.default_subject
+        else:
+            subject_value = text.strip()
+            subject_error = validate_profile_subject(
+                subject_value,
+                session.temp_profile_grade or "",
+                self.settings,
             )
+            if subject_error:
+                log_event(logger, "validation_failure", field="default_subject", value=text)
+                prompt = self._profile_subject_edit_prompt(teacher) if teacher else messages.PROFILE_SUBJECT_PROMPT
+                return self._reply(
+                    f"{subject_error}\n{prompt}",
+                    ConversationState.PROFILE_SUBJECT,
+                )
 
-        session.temp_profile_subject = text.strip()
+        session.temp_profile_subject = subject_value
         session.current_state = ConversationState.PROFILE_LANGUAGE.value
         self.session_repo.save(session)
-        return self._reply(messages.PROFILE_LANGUAGE_PROMPT, ConversationState.PROFILE_LANGUAGE)
+
+        if teacher:
+            return self._reply(self._profile_language_edit_prompt(teacher), ConversationState.PROFILE_LANGUAGE)
+        return self._reply(self._profile_language_prompt(), ConversationState.PROFILE_LANGUAGE)
 
     def _handle_profile_language(self, session, whatsapp_number: str, text: str) -> ConversationReply:
-        if normalize_choice(text) not in self.settings.supported_languages_casefold:
-            log_event(logger, "validation_failure", field="preferred_language", value=text)
-            return self._reply(messages.PROFILE_LANGUAGE_INVALID, ConversationState.PROFILE_LANGUAGE)
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+        if not text:
+            if teacher:
+                return self._reply(self._profile_language_edit_prompt(teacher), ConversationState.PROFILE_LANGUAGE)
+            return self._reply(self._profile_language_prompt(), ConversationState.PROFILE_LANGUAGE)
+
+        if teacher and self._is_keep_value(text):
+            language_value = teacher.preferred_language
+        else:
+            language_value = text.strip()
+            if normalize_choice(language_value) not in self.settings.supported_languages_casefold:
+                log_event(logger, "validation_failure", field="preferred_language", value=text)
+                prompt = self._profile_language_edit_prompt(teacher) if teacher else self._profile_language_prompt()
+                return self._reply(
+                    f"{messages.PROFILE_LANGUAGE_INVALID}\n{prompt}",
+                    ConversationState.PROFILE_LANGUAGE,
+                )
 
         self.teacher_repo.upsert(
             whatsapp_number=whatsapp_number,
             teacher_name=session.temp_profile_name or "",
             default_grade=session.temp_profile_grade or "",
             default_subject=session.temp_profile_subject or "",
-            preferred_language=text.strip(),
+            preferred_language=language_value,
         )
         self.session_repo.reset_for_main_menu(session)
         return self._main_menu_reply(messages.PROFILE_SAVED)
@@ -343,7 +443,7 @@ class ConversationService:
         session.current_state = ConversationState.NEW_LESSON_DURATION.value
         self.session_repo.save(session)
         return self._reply(
-            "Please enter class duration in minutes.",
+            "Please enter class duration in minutes. Example: 35",
             ConversationState.NEW_LESSON_DURATION,
         )
 
@@ -464,7 +564,6 @@ class ConversationService:
                     ConversationState.RETRIEVE_LESSON_NAME,
                 )
         else:
-            # For interactive list replies, the incoming text will be the title/id.
             exact_match = next((title for title in titles if title == text), None)
             if exact_match:
                 selected_title = exact_match

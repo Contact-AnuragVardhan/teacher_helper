@@ -37,8 +37,8 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
             log_event(logger, "openai_response_empty", model=self.model)
             raise RuntimeError("LLM response was empty.")
 
-        if not self._has_required_timings(content):
-            log_event(logger, "openai_timing_retry", model=self.model)
+        if not self._is_response_well_structured(content):
+            log_event(logger, "openai_structure_retry", model=self.model)
             timing_map = prompt.metadata.get("timing_map", {})
             timing_hint = (
                 f"Opening -> ({timing_map.get('opening', 'required')})\n"
@@ -55,10 +55,21 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
                     {
                         "role": "user",
                         "content": (
-                            "Revise your previous answer. Keep the same seven sections and no extra commentary. "
+                            "Revise your previous answer for Lesson Planning. "
+                            "Keep the same seven lesson sections and no extra commentary. "
+                            "Also keep the top summary block exactly like this before Lesson Title:\n"
+                            "Lesson Planning\n"
+                            f"Topic - {prompt.metadata.get('topic', '')}\n"
+                            f"Grade/Class - {prompt.metadata.get('grade', '')}\n"
+                            f"Subject - {prompt.metadata.get('subject', '')}\n"
+                            f"Duration - {prompt.metadata.get('duration_minutes', '')} min\n\n"
                             "You MUST include timings exactly at the start of Opening, Main Teaching, Activity, Q&A, and Closing. "
                             "Use this exact timing distribution:\n"
                             f"{timing_hint}\n\n"
+                            "Make the inside of each section more structured, not paragraph-heavy. "
+                            "Objective must be short separate lines. "
+                            "Main Teaching must be numbered points. "
+                            "Q&A must be exactly 4 numbered questions. "
                             "Do not add markdown headings, Source, or any extra sections."
                         ),
                     },
@@ -68,9 +79,9 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
             if revised:
                 content = revised
 
-        if not self._has_required_timings(content):
-            log_event(logger, "openai_response_missing_timings", model=self.model)
-            raise RuntimeError("LLM response did not include required timings.")
+        if not self._is_response_well_structured(content):
+            log_event(logger, "openai_response_invalid_structure", model=self.model)
+            raise RuntimeError("LLM response did not include the required lesson planning structure.")
 
         log_event(logger, "openai_request_completed", model=self.model)
         return content.strip()
@@ -84,6 +95,24 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
         content = response.choices[0].message.content if response.choices else None
         return (content or "").strip()
 
+    def _is_response_well_structured(self, text: str) -> bool:
+        return (
+            self._has_top_summary_block(text)
+            and self._has_required_timings(text)
+            and self._has_numbered_questions(text)
+        )
+
+    def _has_top_summary_block(self, text: str) -> bool:
+        normalized = text.replace("\r\n", "\n")
+        pattern = (
+            r"(?is)^\s*Lesson Planning\s*\n"
+            r"\s*Topic\s*[-:]\s*.+\n"
+            r"\s*Grade/Class\s*[-:]\s*.+\n"
+            r"\s*Subject\s*[-:]\s*.+\n"
+            r"\s*Duration\s*[-:]\s*.+"
+        )
+        return bool(re.search(pattern, normalized))
+
     def _has_required_timings(self, text: str) -> bool:
         required_sections = ["Opening", "Main Teaching", "Activity", "Q&A", "Closing"]
         normalized = text.replace("\r\n", "\n")
@@ -95,3 +124,16 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
             if not re.search(pattern, normalized):
                 return False
         return True
+
+    def _has_numbered_questions(self, text: str) -> bool:
+        normalized = text.replace("\r\n", "\n")
+        match = re.search(
+            r"(?is)^\s*(?:#+\s*)?\**\s*Q&A\s*\**\s*$\n(.*?)(?:\n\s*(?:#+\s*)?\**\s*Closing\s*\**\s*$|$)",
+            normalized,
+            flags=re.MULTILINE,
+        )
+        if not match:
+            return False
+        qa_block = match.group(1)
+        question_lines = re.findall(r"(?m)^\s*\d+\.\s+.+$", qa_block)
+        return len(question_lines) >= 4
