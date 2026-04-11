@@ -22,6 +22,25 @@ class NcertContentRepository:
         log_event(logger, "ncert_repository_bulk_create", row_count=len(rows))
         return len(rows)
 
+    def exists_for_grade_and_subject(self, grade: str, subject: str) -> bool:
+        row = (
+            self.db.query(NcertContent.id)
+            .filter(
+                func.lower(NcertContent.grade) == grade.strip().lower(),
+                func.lower(NcertContent.subject) == subject.strip().lower(),
+            )
+            .first()
+        )
+        exists = row is not None
+        log_event(
+            logger,
+            "ncert_repository_exists_lookup",
+            grade=grade,
+            subject=subject,
+            exists=exists,
+        )
+        return exists
+
     def find_by_grade_and_subject(self, grade: str, subject: str) -> list[NcertContent]:
         rows = (
             self.db.query(NcertContent)

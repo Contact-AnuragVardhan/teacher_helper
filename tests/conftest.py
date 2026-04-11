@@ -34,12 +34,22 @@ def clear_settings_cache():
 
 @pytest.fixture()
 def db_session() -> Generator:
-    engine = create_engine(
-        "sqlite://",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
+    database_url = os.environ["DATABASE_URL"]
+
+    engine_kwargs = {}
+    if database_url.startswith("sqlite"):
+        engine_kwargs = {
+            "connect_args": {"check_same_thread": False},
+            "poolclass": StaticPool,
+        }
+
+    engine = create_engine(database_url, **engine_kwargs)
+    TestingSessionLocal = sessionmaker(
+        autocommit=False,
+        autoflush=False,
+        bind=engine,
     )
-    TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
     Base.metadata.create_all(bind=engine)
 
     def override_get_db():
@@ -58,6 +68,7 @@ def db_session() -> Generator:
         db.close()
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=engine)
+        engine.dispose()
 
 
 @pytest.fixture()

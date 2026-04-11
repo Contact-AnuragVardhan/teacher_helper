@@ -19,7 +19,7 @@ services:
       - key: OPENAI_BASE_URL
         value: "https://api.openai.com/v1"
       - key: OPENAI_MODEL
-        value: "gpt-5.4-mini"
+        value: "gpt-5.4"
       - key: LLM_PROVIDER
         value: "openai"
       - key: RESET_DB_ON_START
@@ -49,6 +49,6 @@ services:
       - key: WHATSAPP_VERIFY_TOKEN
         sync: false
       - key: WHATSAPP_GRAPH_VERSION
-        value: "v23.0"
+        value: "v25.0"
       - key: WHATSAPP_API_TIMEOUT_SECONDS
         value: "15"

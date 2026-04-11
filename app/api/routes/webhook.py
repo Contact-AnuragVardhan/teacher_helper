@@ -75,7 +75,11 @@ async def handle_whatsapp_webhook(
 
     whatsapp_service = WhatsAppMetaService(settings)
     try:
-        whatsapp_service.send_text_message(to_number=inbound_message["from_number"], body=result.reply)
+        whatsapp_service.send_outbound_message(
+            to_number=inbound_message["from_number"],
+            reply_text=result.reply,
+            outbound=result.outbound,
+        )
     except ValueError as exc:
         log_event(logger, "whatsapp_graph_send_skipped", error=str(exc))
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc)) from exc
@@ -109,6 +113,7 @@ def _handle_mock_payload(payload: WhatsAppWebhookRequest, db: Session) -> JSONRe
         to=payload.from_number,
         reply=result.reply,
         current_state=result.current_state,
+        outbound=result.outbound,
     )
     return JSONResponse(status_code=200, content=response.model_dump())
 
@@ -165,14 +170,17 @@ def _extract_message_body(message: dict[str, Any]) -> str | None:
     if message_type == "interactive":
         interactive = message.get("interactive") or {}
         interactive_type = interactive.get("type")
+
         if interactive_type == "button_reply":
             button_reply = interactive.get("button_reply") or {}
-            return (button_reply.get("title") or button_reply.get("id") or "").strip()
+            return (button_reply.get("id") or button_reply.get("title") or "").strip()
+
         if interactive_type == "list_reply":
             list_reply = interactive.get("list_reply") or {}
-            return (list_reply.get("title") or list_reply.get("id") or "").strip()
+            return (list_reply.get("id") or list_reply.get("title") or "").strip()
 
     if message_type == "button":
-        return (message.get("button") or {}).get("text", "").strip()
+        button = message.get("button") or {}
+        return (button.get("payload") or button.get("text") or "").strip()
 
     return None
