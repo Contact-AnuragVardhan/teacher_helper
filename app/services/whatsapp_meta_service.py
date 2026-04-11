@@ -178,6 +178,9 @@ class WhatsAppMetaService:
             )
 
         if outbound_type == "list":
+            if reply_text and reply_text.strip():
+                self.send_text_message(to_number=to_number, body=reply_text)
+
             return self.send_list_message(
                 to_number=to_number,
                 header_text=outbound["header"],

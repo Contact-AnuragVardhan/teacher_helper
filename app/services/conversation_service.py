@@ -177,7 +177,7 @@ class ConversationService:
 
     def _save_menu_reply(self, lesson_text: str) -> ConversationReply:
         return self._reply(
-            f"{messages.NEW_LESSON_SAVE_PROMPT_PREFIX}\n\n{lesson_text}\n\nDo you want to save this lesson?\n1 → Save Lesson\n2 → Cancel",
+            f"{messages.NEW_LESSON_SAVE_PROMPT_PREFIX}\n\n{lesson_text}",
             ConversationState.NEW_LESSON_CONFIRM_SAVE,
             outbound={
                 "type": "buttons",
@@ -191,11 +191,12 @@ class ConversationService:
             },
         )
 
-    def _all_lessons_interactive_reply(self, titles: list[str]) -> ConversationReply:
+    def _all_lessons_interactive_reply(self, lesson_summaries: list[tuple[int, str]]) -> ConversationReply:
         rows = []
-        for title in titles:
+        titles = [title for _, title in lesson_summaries]
+        for lesson_id, title in lesson_summaries:
             item = {
-                "id": title,
+                "id": f"lesson_id:{lesson_id}",
                 "title": title[:24],
             }
             if len(title) > 24:
@@ -259,7 +260,8 @@ class ConversationService:
                 self.session_repo.clear_temp_profile(session)
                 return self._reply(messages.NEW_LESSON_WITHOUT_PROFILE, ConversationState.PROFILE_NAME)
 
-            titles = self.lesson_repo.list_titles_by_teacher(teacher.id)
+            lesson_summaries = self.lesson_repo.list_summaries_by_teacher(teacher.id)
+            titles = [title for _, title in lesson_summaries]
             if not titles:
                 self.session_repo.reset_for_main_menu(session)
                 return self._main_menu_reply("You do not have any saved lessons yet.")
@@ -268,7 +270,7 @@ class ConversationService:
             self.session_repo.save(session)
 
             if len(titles) <= 10:
-                return self._all_lessons_interactive_reply(titles)
+                return self._all_lessons_interactive_reply(lesson_summaries)
 
             return self._all_lessons_fallback_reply(titles)
 
@@ -552,33 +554,41 @@ class ConversationService:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply("You do not have any saved lessons yet.")
 
-        selected_title = None
+        lesson = None
 
-        if text and text.isdigit():
+        if choice.startswith("lesson_id:"):
+            raw_lesson_id = choice.split(":", 1)[1].strip()
+            if raw_lesson_id.isdigit():
+                lesson = self.lesson_repo.get_by_teacher_and_id(teacher.id, int(raw_lesson_id))
+        elif text and text.isdigit():
             lesson_index = int(text)
             if 1 <= lesson_index <= len(titles):
                 selected_title = titles[lesson_index - 1]
+                lesson = self.lesson_repo.get_by_teacher_and_name(teacher.id, selected_title)
             else:
                 return self._reply(
                     "Invalid lesson number. Please enter a valid lesson number from the list.\nSend 0 to return to the main menu.",
                     ConversationState.RETRIEVE_LESSON_NAME,
                 )
         else:
-            exact_match = next((title for title in titles if title == text), None)
+            exact_match = next((title for title in titles if title.casefold() == choice), None)
             if exact_match:
-                selected_title = exact_match
+                lesson = self.lesson_repo.get_by_teacher_and_name(teacher.id, exact_match)
             else:
-                if len(titles) <= 10:
+                prefix_matches = [title for title in titles if title.casefold().startswith(choice)]
+                if len(prefix_matches) == 1:
+                    lesson = self.lesson_repo.get_by_teacher_and_name(teacher.id, prefix_matches[0])
+                else:
+                    if len(titles) <= 10:
+                        return self._reply(
+                            "Please choose a lesson from the WhatsApp list, or send 0 to return to the main menu.",
+                            ConversationState.RETRIEVE_LESSON_NAME,
+                        )
                     return self._reply(
-                        "Please choose a lesson from the WhatsApp list, or send 0 to return to the main menu.",
+                        "Please enter the lesson number from the list.\nSend 0 to return to the main menu.",
                         ConversationState.RETRIEVE_LESSON_NAME,
                     )
-                return self._reply(
-                    "Please enter the lesson number from the list.\nSend 0 to return to the main menu.",
-                    ConversationState.RETRIEVE_LESSON_NAME,
-                )
 
-        lesson = self.lesson_repo.get_by_teacher_and_name(teacher.id, selected_title)
         if not lesson:
             return self._reply(
                 "I could not find that lesson. Please try again.\nSend 0 to return to the main menu.",

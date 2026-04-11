@@ -32,6 +32,24 @@ class LessonRepository:
         )
         return lesson
 
+    def get_by_teacher_and_id(self, teacher_id: int, lesson_id: int) -> LessonPlan | None:
+        lesson = (
+            self.db.query(LessonPlan)
+            .filter(
+                LessonPlan.teacher_id == teacher_id,
+                LessonPlan.id == lesson_id,
+            )
+            .first()
+        )
+        log_event(
+            logger,
+            "lesson_lookup_by_id",
+            teacher_id=teacher_id,
+            lesson_id=lesson_id,
+            found=lesson is not None,
+        )
+        return lesson
+
     def list_titles_by_teacher(self, teacher_id: int) -> list[str]:
         rows = (
             self.db.query(LessonPlan.lesson_name)
@@ -47,6 +65,22 @@ class LessonRepository:
             count=len(titles),
         )
         return titles
+
+    def list_summaries_by_teacher(self, teacher_id: int) -> list[tuple[int, str]]:
+        rows = (
+            self.db.query(LessonPlan.id, LessonPlan.lesson_name)
+            .filter(LessonPlan.teacher_id == teacher_id)
+            .order_by(func.lower(LessonPlan.lesson_name))
+            .all()
+        )
+        summaries = [(row[0], row[1]) for row in rows]
+        log_event(
+            logger,
+            "lesson_summaries_listed",
+            teacher_id=teacher_id,
+            count=len(summaries),
+        )
+        return summaries
 
     def create(
         self,
