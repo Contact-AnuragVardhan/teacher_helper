@@ -11,6 +11,7 @@ from app.repositories.teacher_repository import TeacherRepository
 from app.services.lesson_generator import LessonGeneratorService
 from app.state_machine.states import ConversationState
 from app.utils.profile_validation import validate_profile_grade, validate_profile_subject
+from app.utils.subject_normalization import normalize_subject
 from app.utils.text import clean_text, normalize_choice
 
 logger = get_logger(__name__)
@@ -75,16 +76,12 @@ class ConversationService:
     ) -> ConversationReply:
         return ConversationReply(reply=reply, current_state=state.value, outbound=outbound)
 
-    def _main_menu_text(self) -> str:
-        return (
-            "Main Menu:\n"
-            "1 → New Lesson\n"
-            "2 → All Lessons\n"
-            "3 → My Profile"
-        )
-
-    def _main_menu_with_prefix(self, prefix: str) -> str:
-        return f"{prefix}\n\n{self._main_menu_text()}"
+    def _main_menu_prompt(self, prefix: str) -> str:
+        prompt = "Please tap one option below."
+        clean_prefix = (prefix or "").strip()
+        if not clean_prefix:
+            return prompt
+        return f"{clean_prefix}\n\n{prompt}"
 
     def _format_numbered_titles(self, titles: list[str]) -> str:
         return "\n".join(f"{index}. {title}" for index, title in enumerate(titles, start=1))
@@ -156,23 +153,24 @@ class ConversationService:
             f"Reply with the new language, or send 'same' to keep it. Example: {self._language_options_text()}"
         )
 
+    def _main_menu_outbound(self) -> dict:
+        return {
+            "type": "buttons",
+            "header": "Teacher Helper",
+            "body": "Choose an option",
+            "footer": "Tap one option below",
+            "buttons": [
+                {"id": "menu_new_lesson", "title": "New Lesson"},
+                {"id": "menu_all_lessons", "title": "All Lessons"},
+                {"id": "menu_my_profile", "title": "My Profile"},
+            ],
+        }
+
     def _main_menu_reply(self, prefix: str) -> ConversationReply:
         return self._reply(
-            self._main_menu_with_prefix(prefix),
+            self._main_menu_prompt(prefix),
             ConversationState.MAIN_MENU,
-            outbound={
-                "type": "list",
-                "header": "Teacher Helper",
-                "body": "Choose an option",
-                "button_text": "Open Menu",
-                "section_title": "Main Menu",
-                "footer": "Tap one option below",
-                "rows": [
-                    {"id": "menu_new_lesson", "title": "New Lesson"},
-                    {"id": "menu_all_lessons", "title": "All Lessons"},
-                    {"id": "menu_my_profile", "title": "My Profile"},
-                ],
-            },
+            outbound=self._main_menu_outbound(),
         )
 
     def _save_menu_reply(self, lesson_text: str) -> ConversationReply:
@@ -193,7 +191,6 @@ class ConversationService:
 
     def _all_lessons_interactive_reply(self, lesson_summaries: list[tuple[int, str]]) -> ConversationReply:
         rows = []
-        titles = [title for _, title in lesson_summaries]
         for lesson_id, title in lesson_summaries:
             item = {
                 "id": f"lesson_id:{lesson_id}",
@@ -205,8 +202,7 @@ class ConversationService:
 
         reply_text = (
             "All Lessons:\n"
-            f"{self._format_numbered_titles(titles)}\n\n"
-            "Choose a lesson from the list below."
+            "Please choose a lesson from the list below."
         )
 
         return self._reply(
@@ -350,7 +346,7 @@ class ConversationService:
         if teacher and self._is_keep_value(text):
             subject_value = teacher.default_subject
         else:
-            subject_value = text.strip()
+            subject_value = normalize_subject(text)
             subject_error = validate_profile_subject(
                 subject_value,
                 session.temp_profile_grade or "",
@@ -433,7 +429,8 @@ class ConversationService:
             return self._reply(self._new_lesson_subject_prompt(), ConversationState.NEW_LESSON_SUBJECT)
 
         lesson_grade = session.temp_profile_grade or ""
-        subject_error = validate_profile_subject(text, lesson_grade, self.settings)
+        normalized_subject = normalize_subject(text)
+        subject_error = validate_profile_subject(normalized_subject, lesson_grade, self.settings)
         if subject_error:
             log_event(logger, "validation_failure", field="lesson_subject", value=text)
             return self._reply(
@@ -441,7 +438,7 @@ class ConversationService:
                 ConversationState.NEW_LESSON_SUBJECT,
             )
 
-        session.temp_profile_subject = text.strip()
+        session.temp_profile_subject = normalized_subject
         session.current_state = ConversationState.NEW_LESSON_DURATION.value
         self.session_repo.save(session)
         return self._reply(
@@ -597,19 +594,7 @@ class ConversationService:
 
         self.session_repo.reset_for_main_menu(session)
         return self._reply(
-            f"{lesson.lesson_text}\n\n{self._main_menu_text()}",
+            f"{lesson.lesson_text}\n\nPlease tap one option below.",
             ConversationState.MAIN_MENU,
-            outbound={
-                "type": "list",
-                "header": "Teacher Helper",
-                "body": "Choose what you want to do next.",
-                "button_text": "Open Menu",
-                "section_title": "Main Menu",
-                "footer": "Tap one option below",
-                "rows": [
-                    {"id": "menu_new_lesson", "title": "New Lesson"},
-                    {"id": "menu_all_lessons", "title": "All Lessons"},
-                    {"id": "menu_my_profile", "title": "My Profile"},
-                ],
-            },
+            outbound=self._main_menu_outbound(),
         )
