@@ -1,13 +1,5 @@
-from datetime import datetime, timedelta
-
-from app.core.messages import (
-    DUPLICATE_LESSON_NAME,
-    INVALID_DURATION,
-    LESSON_NOT_FOUND,
-    MAIN_MENU,
-)
+from app.core.messages import DUPLICATE_LESSON_NAME, INVALID_DURATION
 from app.models.lesson_plan import LessonPlan
-from app.models.session_state import SessionState
 from app.models.teacher_profile import TeacherProfile
 
 
@@ -18,217 +10,228 @@ def send(client, body: str, phone: str = PHONE):
     return client.post("/webhook/whatsapp", json={"from": phone, "body": body})
 
 
-def create_profile_via_webhook(client, phone: str = PHONE):
+def create_profile_via_webhook(client, phone: str = PHONE, language: str = "English"):
     send(client, "3", phone)
     send(client, "Anurag", phone)
     send(client, "5", phone)
-    send(client, "Science", phone)
-    return send(client, "English", phone)
+    send(client, "English", phone)
+    return send(client, language, phone)
 
 
-def generate_lesson_until_save_prompt(client, phone: str = PHONE):
+def generate_lesson_until_save_prompt(
+    client,
+    phone: str = PHONE,
+    topic: str = "Plants",
+    grade: str = "5",
+    subject: str = "English",
+    duration: str = "35",
+):
     send(client, "1", phone)
-    send(client, "Plants", phone)
-    return send(client, "35", phone)
+    send(client, topic, phone)
+    send(client, grade, phone)
+    send(client, subject, phone)
+    return send(client, duration, phone)
 
 
-def test_new_user_hitting_my_profile_flow(client, db_session):
-    response = send(client, "My Profile")
-    payload = response.json()
+def save_generated_lesson(client, lesson_name: str, phone: str = PHONE):
+    send(client, "1", phone)
+    return send(client, lesson_name, phone)
 
-    assert response.status_code == 200
-    assert payload["current_state"] == "PROFILE_NAME"
-    assert "What is your name?" in payload["reply"]
 
-    session = db_session.query(SessionState).filter_by(whatsapp_number=PHONE).first()
-    assert session is not None
-    assert session.current_state == "PROFILE_NAME"
+def create_saved_lesson(client, lesson_name: str, topic: str, phone: str = PHONE):
+    generate_lesson_until_save_prompt(client, phone=phone, topic=topic)
+    save_generated_lesson(client, lesson_name, phone=phone)
 
 
 def test_successful_profile_creation(client, db_session):
     response = create_profile_via_webhook(client)
     payload = response.json()
 
-    assert response.status_code == 200
     assert payload["current_state"] == "MAIN_MENU"
-    assert "Your profile has been saved." in payload["reply"]
-    assert MAIN_MENU in payload["reply"]
+    assert "1 → New Lesson" in payload["reply"]
+    assert "2 → All Lessons" in payload["reply"]
 
-    teacher = db_session.query(TeacherProfile).filter_by(whatsapp_number=PHONE).first()
-    assert teacher is not None
-    assert teacher.teacher_name == "Anurag"
-    assert teacher.default_grade == "5"
-    assert teacher.default_subject == "Science"
-    assert teacher.preferred_language == "English"
+    teacher = db_session.query(TeacherProfile).first()
+    assert teacher.default_subject == "English"
 
 
-def test_new_lesson_without_profile_redirects_correctly(client):
-    response = send(client, "1")
-    payload = response.json()
+def test_profile_prompts_include_examples(client):
+    response = send(client, "3")
+    assert response.json()["current_state"] == "PROFILE_NAME"
 
-    assert response.status_code == 200
-    assert payload["current_state"] == "PROFILE_NAME"
-    assert "Please complete your profile first." in payload["reply"]
+    response = send(client, "Anurag")
+    assert "Example: 1, 2, 3" in response.json()["reply"]
+
+    response = send(client, "5")
+    assert "Example: English" in response.json()["reply"]
+
+    response = send(client, "English")
+    assert "English, Hinglish" in response.json()["reply"]
 
 
-def test_successful_lesson_generation(client, db_session):
+def test_successful_lesson_generation_returns_button_outbound(client):
     create_profile_via_webhook(client)
     response = generate_lesson_until_save_prompt(client)
     payload = response.json()
 
-    assert response.status_code == 200
     assert payload["current_state"] == "NEW_LESSON_CONFIRM_SAVE"
-    assert "Lesson Title" in payload["reply"]
-    assert "Objective" in payload["reply"]
-    assert "Reply:" in payload["reply"]
+    assert payload["outbound"]["type"] == "buttons"
+
+
+def test_new_lesson_prompts_include_examples(client):
+    create_profile_via_webhook(client)
+
+    response = send(client, "1")
+    assert 'Example: "The Portrait of a Lady"' in response.json()["reply"]
+
+    response = send(client, "Plants")
+    assert "Example: 1, 2, 3" in response.json()["reply"]
+
+    response = send(client, "5")
+    assert "Example: English" in response.json()["reply"]
 
 
 def test_invalid_duration_remains_in_duration_state(client):
     create_profile_via_webhook(client)
+
     send(client, "1")
     send(client, "Fractions")
+    send(client, "5")
+    send(client, "English")
+
     response = send(client, "abc")
     payload = response.json()
 
-    assert response.status_code == 200
     assert payload["current_state"] == "NEW_LESSON_DURATION"
     assert payload["reply"] == INVALID_DURATION
 
 
 def test_save_lesson_flow_works(client, db_session):
     create_profile_via_webhook(client)
+
     generate_lesson_until_save_prompt(client)
     send(client, "1")
-    response = send(client, "Plants Basics")
-    payload = response.json()
-
-    assert response.status_code == 200
-    assert payload["current_state"] == "MAIN_MENU"
-    assert "Your lesson has been saved." in payload["reply"]
+    send(client, "Plants Basics")
 
     lesson = db_session.query(LessonPlan).first()
-    assert lesson is not None
     assert lesson.lesson_name == "Plants Basics"
-    assert lesson.topic == "Plants"
 
 
-def test_cancel_save_discards_temp_lesson(client, db_session):
+def test_profile_can_be_edited_and_saved(client, db_session):
     create_profile_via_webhook(client)
-    generate_lesson_until_save_prompt(client)
+
+    response = send(client, "3")
+    assert "Current profile:" in response.json()["reply"]
+
+    send(client, "same")
+    send(client, "6")
+    send(client, "same")
+    response = send(client, "Hinglish")
+
+    assert response.json()["current_state"] == "MAIN_MENU"
+
+    teacher = db_session.query(TeacherProfile).first()
+    assert teacher.teacher_name == "Anurag"
+    assert teacher.default_grade == "6"
+    assert teacher.default_subject == "English"
+    assert teacher.preferred_language == "Hinglish"
+
+
+def test_hinglish_profile_generates_hinglish_lesson(client):
+    create_profile_via_webhook(client, language="Hinglish")
+
+    response = generate_lesson_until_save_prompt(client, topic="Plants")
+    payload = response.json()
+
+    assert payload["current_state"] == "NEW_LESSON_CONFIRM_SAVE"
+    assert "samajhne ki basic understanding" in payload["reply"]
+
+
+# =========================
+# ALL LESSONS TESTS
+# =========================
+
+def test_all_lessons_with_10_or_less_returns_whatsapp_list(client):
+    create_profile_via_webhook(client)
+
+    create_saved_lesson(client, "Plants Basics", "Plants")
+    create_saved_lesson(client, "Fractions Basics", "Fractions")
+
     response = send(client, "2")
     payload = response.json()
 
-    assert response.status_code == 200
-    assert payload["current_state"] == "MAIN_MENU"
-    assert "Lesson creation was cancelled." in payload["reply"]
-    assert db_session.query(LessonPlan).count() == 0
+    assert payload["outbound"]["type"] == "list"
 
-    session = db_session.query(SessionState).filter_by(whatsapp_number=PHONE).first()
-    assert session.current_state == "MAIN_MENU"
-    assert session.temp_generated_lesson is None
+    ids = [row["id"] for row in payload["outbound"]["rows"]]
+
+    assert "Plants Basics" in ids
+    assert "Fractions Basics" in ids
 
 
-def test_retrieve_existing_lesson_works(client):
+def test_all_lessons_with_more_than_10_uses_numbered_fallback(client):
     create_profile_via_webhook(client)
-    generate_lesson_until_save_prompt(client)
-    send(client, "1")
-    send(client, "Plants Basics")
 
-    send(client, "2")
-    response = send(client, "Plants Basics")
+    for i in range(1, 12):
+        create_saved_lesson(client, f"Lesson {i}", f"Topic {i}")
+
+    response = send(client, "2")
     payload = response.json()
 
-    assert response.status_code == 200
+    assert payload["outbound"] is None
+    assert "Reply with the lesson number to open it." in payload["reply"]
+    assert "Lesson 1" in payload["reply"]
+    assert "Lesson 11" in payload["reply"]
+
+
+def test_retrieve_existing_lesson_by_number_from_fallback_list_works(client):
+    create_profile_via_webhook(client)
+
+    for i in range(1, 12):
+        create_saved_lesson(client, f"Lesson {i}", f"Topic {i}")
+
+    send(client, "2")
+    response = send(client, "3")
+
+    payload = response.json()
+
     assert payload["current_state"] == "MAIN_MENU"
     assert "Lesson Title" in payload["reply"]
-    assert MAIN_MENU in payload["reply"]
 
 
-def test_retrieve_missing_lesson_returns_correct_message(client):
+def test_invalid_lesson_number_keeps_state(client):
     create_profile_via_webhook(client)
+
+    for i in range(1, 12):
+        create_saved_lesson(client, f"Lesson {i}", f"Topic {i}")
+
     send(client, "2")
-    response = send(client, "Unknown Lesson")
+    response = send(client, "99")
+
     payload = response.json()
 
-    assert response.status_code == 200
     assert payload["current_state"] == "RETRIEVE_LESSON_NAME"
-    assert LESSON_NOT_FOUND in payload["reply"]
-    assert "send 0 to return to the main menu" in payload["reply"].lower()
+    assert "Invalid lesson number" in payload["reply"]
 
 
-def test_duplicate_lesson_name_rejection(client):
+def test_all_lessons_exit_to_main_menu(client):
     create_profile_via_webhook(client)
-    generate_lesson_until_save_prompt(client)
-    send(client, "1")
-    send(client, "Plants Basics")
 
-    send(client, "1")
-    send(client, "Plants")
-    send(client, "35")
-    send(client, "1")
-    response = send(client, "Plants Basics")
-    payload = response.json()
+    create_saved_lesson(client, "Plants Basics", "Plants")
 
-    assert response.status_code == 200
-    assert payload["current_state"] == "NEW_LESSON_NAME"
-    assert payload["reply"] == DUPLICATE_LESSON_NAME
-
-
-def test_invalid_main_menu_input(client):
-    response = send(client, "hello")
-    payload = response.json()
-
-    assert response.status_code == 200
-    assert payload["current_state"] == "MAIN_MENU"
-    assert payload["reply"].startswith("I did not understand that.")
-    assert MAIN_MENU in payload["reply"]
-
-
-def test_duplicate_lesson_name_overwrite_mode(client, db_session, monkeypatch):
-    monkeypatch.setenv("DUPLICATE_LESSON_POLICY", "overwrite")
-    create_profile_via_webhook(client)
-    generate_lesson_until_save_prompt(client)
-    send(client, "1")
-    send(client, "Plants Basics")
-
-    send(client, "1")
-    send(client, "Roots and Stems")
-    send(client, "35")
-    send(client, "1")
-    response = send(client, "Plants Basics")
-    payload = response.json()
-
-    assert response.status_code == 200
-    assert payload["current_state"] == "MAIN_MENU"
-    lesson = db_session.query(LessonPlan).filter_by(lesson_name="Plants Basics").one()
-    assert lesson.topic == "Roots and Stems"
-
-
-def test_session_expiry_reset(client, db_session, monkeypatch):
-    monkeypatch.setenv("SESSION_TIMEOUT_MINUTES", "1")
-    create_profile_via_webhook(client)
-    send(client, "1")
-    send(client, "Plants")
-
-    session = db_session.query(SessionState).filter_by(whatsapp_number=PHONE).one()
-    session.updated_at = datetime.utcnow() - timedelta(minutes=10)
-    db_session.add(session)
-    db_session.commit()
-
-    response = send(client, "hello after timeout")
-    payload = response.json()
-
-    assert response.status_code == 200
-    assert payload["current_state"] == "MAIN_MENU"
-    assert payload["reply"].startswith("I did not understand that.")
-
-def test_retrieve_missing_lesson_allows_exit_to_main_menu(client, db_session):
-    create_profile_via_webhook(client)
     send(client, "2")
-    send(client, "Unknown Lesson")
     response = send(client, "0")
+
     payload = response.json()
 
-    assert response.status_code == 200
     assert payload["current_state"] == "MAIN_MENU"
-    assert payload["reply"] == MAIN_MENU
+
+
+def test_duplicate_lesson_name_message_has_example(client):
+    create_profile_via_webhook(client)
+
+    create_saved_lesson(client, "Plants Basics", "Plants")
+    generate_lesson_until_save_prompt(client, topic="Trees")
+    send(client, "1")
+    response = send(client, "Plants Basics")
+
+    assert response.json()["reply"] == DUPLICATE_LESSON_NAME

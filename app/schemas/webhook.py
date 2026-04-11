@@ -12,3 +12,4 @@ class WhatsAppWebhookResponse(BaseModel):
     to: str
     reply: str
     current_state: str
+    outbound: dict | None = None

@@ -98,7 +98,14 @@ class LessonGeneratorService:
             lesson_text = self.deterministic_provider.generate(prompt)
             provider_used = self.deterministic_provider.provider_name
 
-        lesson_text = self._finalize_lesson_text(lesson_text, inspectable_rows)
+        lesson_text = self._finalize_lesson_text(
+            lesson_text,
+            rows=inspectable_rows,
+            topic=topic,
+            grade=effective_grade,
+            subject=effective_subject,
+            duration_minutes=duration_minutes,
+        )
 
         log_event(
             logger,
@@ -124,7 +131,16 @@ class LessonGeneratorService:
         log_event(logger, "lesson_generation_provider_initialized", provider=self.deterministic_provider.provider_name)
         return self.deterministic_provider
 
-    def _finalize_lesson_text(self, lesson_text: str, rows: list[dict]) -> str:
+    def _finalize_lesson_text(
+        self,
+        lesson_text: str,
+        *,
+        rows: list[dict],
+        topic: str,
+        grade: str,
+        subject: str,
+        duration_minutes: int,
+    ) -> str:
         text = (lesson_text or "").replace("\r\n", "\n").strip()
         if not text:
             return text
@@ -140,12 +156,14 @@ class LessonGeneratorService:
             "activity": "Activity",
             "q&a": "Q&A",
             "closing": "Closing",
+            "conclusion": "Closing",
             "source": "Source",
         }
 
         cleaned_lines: list[str] = []
         skip_generated_source_block = False
         skip_noise_block = False
+        skip_top_summary_block = False
 
         for line in text.splitlines():
             stripped = line.strip()
@@ -153,6 +171,15 @@ class LessonGeneratorService:
                 if cleaned_lines and cleaned_lines[-1] != "":
                     cleaned_lines.append("")
                 continue
+
+            lowered_raw = stripped.casefold()
+            if lowered_raw == "lesson planning":
+                skip_top_summary_block = True
+                continue
+
+            if skip_top_summary_block and self._is_top_summary_line(stripped):
+                continue
+            skip_top_summary_block = False
 
             heading_key = self._extract_heading_key(stripped)
             if heading_key:
@@ -178,7 +205,10 @@ class LessonGeneratorService:
                 lowered.startswith(prefix)
                 for prefix in (
                     "grade:",
+                    "grade/class:",
                     "subject:",
+                    "duration:",
+                    "topic:",
                     "book url:",
                     "topic summary:",
                     "keywords:",
@@ -208,7 +238,15 @@ class LessonGeneratorService:
 
             cleaned_lines.append(normalized)
 
-        text = "\n".join(self._squash_blank_lines(cleaned_lines)).strip()
+        body_text = "\n".join(self._squash_blank_lines(cleaned_lines)).strip()
+        planning_block = self._build_planning_block(
+            topic=topic,
+            grade=grade,
+            subject=subject,
+            duration_minutes=duration_minutes,
+        )
+
+        text = f"{planning_block}\n\n{body_text}".strip()
         source_block = self._build_source_block(rows)
         if source_block:
             text = f"{text}\n\n{source_block}".strip()
@@ -218,7 +256,7 @@ class LessonGeneratorService:
         normalized = self._normalize_inline_markdown(line)
         normalized = normalized.rstrip(":").strip()
         key = normalized.casefold()
-        if key in {"lesson title", "objective", "opening", "main teaching", "activity", "q&a", "closing", "source"}:
+        if key in {"lesson title", "objective", "opening", "main teaching", "activity", "q&a", "closing", "conclusion", "source"}:
             return key
         return None
 
@@ -239,6 +277,10 @@ class LessonGeneratorService:
             )
         )
 
+    def _is_top_summary_line(self, text: str) -> bool:
+        lowered = text.strip().casefold()
+        return lowered.startswith(("topic -", "topic:", "grade/class -", "grade/class:", "subject -", "subject:", "duration -", "duration:"))
+
     def _squash_blank_lines(self, lines: list[str]) -> list[str]:
         output: list[str] = []
         for line in lines:
@@ -250,6 +292,15 @@ class LessonGeneratorService:
         while output and output[-1] == "":
             output.pop()
         return output
+
+    def _build_planning_block(self, *, topic: str, grade: str, subject: str, duration_minutes: int) -> str:
+        return (
+            "Lesson Planning\n"
+            f"Topic - {topic.strip()}\n"
+            f"Grade/Class - {grade.strip()}\n"
+            f"Subject - {subject.strip()}\n"
+            f"Duration - {int(duration_minutes)} min"
+        )
 
     def _build_source_block(self, rows: list[dict]) -> str:
         if not rows:

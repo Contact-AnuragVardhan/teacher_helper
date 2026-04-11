@@ -1,6 +1,7 @@
 import csv
 import json
 import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,7 +42,7 @@ class NcertIngestionService:
 
         if truncate_first:
             self.repo.truncate()
-            log_event(logger, "ncert_truncate", path=str(input_path))
+            logger.info("TRUNCATED existing NCERT content | path=%s", input_path)
 
         total_files_processed = 0
         total_records = 0
@@ -50,13 +51,38 @@ class NcertIngestionService:
         if input_path.is_file():
             if input_path.suffix.lower() not in {".json", ".csv"}:
                 raise ValueError("Single-file ingestion supports only JSON or CSV files.")
+
             raw_records = self._read_records(input_path)
-            rows = self._normalize_records(raw_records)
+            grade, subject, book = self._derive_processing_context(raw_records, input_path)
+
+            logger.info(
+                "START FILE | grade=%s | subject=%s | book=%s | file=%s",
+                grade or "-",
+                subject or "-",
+                book or input_path.stem,
+                input_path,
+            )
+
+            rows, skipped_non_english = self._normalize_records(raw_records)
+
             if rows:
                 self.repo.bulk_create(rows)
+
             total_files_processed = 1
             total_records = len(raw_records)
             total_chunks = len(rows)
+
+            logger.info(
+                "DONE FILE  | grade=%s | subject=%s | book=%s | file=%s | records=%s | inserted_chunks=%s | skipped_non_english=%s",
+                grade or "-",
+                subject or "-",
+                book or input_path.stem,
+                input_path,
+                len(raw_records),
+                len(rows),
+                skipped_non_english,
+            )
+
             return IngestionSummary(
                 files_processed=total_files_processed,
                 records_processed=total_records,
@@ -68,19 +94,29 @@ class NcertIngestionService:
         )
         book_dirs = self._discover_book_dirs(input_path)
 
-        log_event(
-            logger,
-            "ncert_ingest_started",
-            path=str(input_path),
-            truncate_first=truncate_first,
-            structured_file_count=len(structured_files),
-            book_directory_count=len(book_dirs),
-            include_supplementary=include_supplementary,
+        logger.info(
+            "NCERT INGEST STARTED | path=%s | structured_files=%s | book_dirs=%s | truncate_first=%s | include_supplementary=%s",
+            input_path,
+            len(structured_files),
+            len(book_dirs),
+            truncate_first,
+            include_supplementary,
         )
 
         for file_path in structured_files:
             raw_records = self._read_records(file_path)
-            rows = self._normalize_records(raw_records)
+            grade, subject, book = self._derive_processing_context(raw_records, file_path)
+
+            logger.info(
+                "START FILE | grade=%s | subject=%s | book=%s | file=%s",
+                grade or "-",
+                subject or "-",
+                book or file_path.stem,
+                file_path,
+            )
+
+            rows, skipped_non_english = self._normalize_records(raw_records)
+
             if rows:
                 self.repo.bulk_create(rows)
 
@@ -88,54 +124,99 @@ class NcertIngestionService:
             total_records += len(raw_records)
             total_chunks += len(rows)
 
-            log_event(
-                logger,
-                "ncert_ingest_structured_file",
-                path=str(file_path),
-                records=len(raw_records),
-                chunks=len(rows),
+            logger.info(
+                "DONE FILE  | grade=%s | subject=%s | book=%s | file=%s | records=%s | inserted_chunks=%s | skipped_non_english=%s",
+                grade or "-",
+                subject or "-",
+                book or file_path.stem,
+                file_path,
+                len(raw_records),
+                len(rows),
+                skipped_non_english,
             )
 
         for book_dir in book_dirs:
-            raw_records, pdf_count = self._read_book_directory_records(
+            summary = self.ingest_book_directory(
                 root_path=input_path,
                 book_dir=book_dir,
                 include_supplementary=include_supplementary,
             )
-            rows = self._normalize_records(raw_records)
-            if rows:
-                self.repo.bulk_create(rows)
-
-            total_files_processed += pdf_count
-            total_records += len(raw_records)
-            total_chunks += len(rows)
-
-            log_event(
-                logger,
-                "ncert_ingest_book_directory",
-                path=str(book_dir),
-                pdf_files=pdf_count,
-                records=len(raw_records),
-                chunks=len(rows),
-            )
+            total_files_processed += summary.files_processed
+            total_records += summary.records_processed
+            total_chunks += summary.chunks_created
 
         if total_files_processed == 0 and total_records == 0:
             raise ValueError(
                 "No ingestible content found. Expected JSON/CSV files or book folders containing url.txt and chapter PDFs."
             )
 
-        log_event(
-            logger,
-            "ncert_ingest_completed",
-            path=str(input_path),
-            files_processed=total_files_processed,
-            records_processed=total_records,
-            chunks_created=total_chunks,
+        logger.info(
+            "NCERT INGEST COMPLETED | path=%s | files_processed=%s | records_processed=%s | chunks_created=%s",
+            input_path,
+            total_files_processed,
+            total_records,
+            total_chunks,
         )
+
         return IngestionSummary(
             files_processed=total_files_processed,
             records_processed=total_records,
             chunks_created=total_chunks,
+        )
+
+    def ingest_book_directory(
+        self,
+        *,
+        root_path: str | Path,
+        book_dir: str | Path,
+        include_supplementary: bool = False,
+    ) -> IngestionSummary:
+        resolved_root_path = Path(root_path)
+        resolved_book_dir = Path(book_dir)
+
+        if not resolved_root_path.exists():
+            raise FileNotFoundError(f"Root path not found: {resolved_root_path}")
+        if not resolved_book_dir.exists():
+            raise FileNotFoundError(f"Book directory not found: {resolved_book_dir}")
+
+        rel_parts = resolved_book_dir.relative_to(resolved_root_path).parts
+        grade = self._normalize_grade(rel_parts[0]) if len(rel_parts) >= 1 else None
+        subject = rel_parts[1].strip() if len(rel_parts) >= 2 else None
+        book = resolved_book_dir.name.strip()
+
+        logger.info(
+            "START BOOK | grade=%s | subject=%s | book=%s | path=%s",
+            grade or "-",
+            subject or "-",
+            book or "-",
+            resolved_book_dir,
+        )
+
+        raw_records, pdf_count = self._read_book_directory_records(
+            root_path=resolved_root_path,
+            book_dir=resolved_book_dir,
+            include_supplementary=include_supplementary,
+        )
+        rows, skipped_non_english = self._normalize_records(raw_records)
+
+        if rows:
+            self.repo.bulk_create(rows)
+
+        logger.info(
+            "DONE BOOK  | grade=%s | subject=%s | book=%s | pdf_files=%s | records=%s | inserted_chunks=%s | skipped_non_english=%s",
+            grade or "-",
+            subject or "-",
+            book or "-",
+            pdf_count,
+            len(raw_records),
+            len(rows),
+            skipped_non_english,
+        )
+
+        return IngestionSummary(
+            files_processed=pdf_count,
+            records_processed=len(raw_records),
+            chunks_created=len(rows),
         )
 
     def _discover_book_dirs(self, root_path: Path) -> list[Path]:
@@ -152,11 +233,10 @@ class NcertIngestionService:
         rel_parts = book_dir.relative_to(root_path).parts
 
         if len(rel_parts) < 3:
-            log_event(
-                logger,
-                "ncert_book_dir_skipped",
-                path=str(book_dir),
-                reason="expected at least Grade/Subject/.../BookName structure",
+            logger.warning(
+                "SKIP BOOK DIR | path=%s | reason=%s",
+                book_dir,
+                "expected at least Grade/Subject/.../BookName structure",
             )
             return [], 0
 
@@ -170,13 +250,33 @@ class NcertIngestionService:
         processed_pdf_count = 0
 
         for pdf_path in pdf_paths:
+            logger.info(
+                "START PDF  | grade=%s | subject=%s | book=%s | pdf=%s",
+                grade,
+                subject,
+                book,
+                pdf_path.name,
+            )
+
             full_text, first_page_text = self._extract_pdf_text(pdf_path)
             if not full_text.strip():
-                log_event(logger, "ncert_pdf_skipped_empty", path=str(pdf_path))
+                logger.warning(
+                    "SKIP PDF   | grade=%s | subject=%s | book=%s | pdf=%s | reason=empty_text",
+                    grade,
+                    subject,
+                    book,
+                    pdf_path.name,
+                )
                 continue
 
             if not include_supplementary and self._looks_like_supplementary(pdf_path, first_page_text):
-                log_event(logger, "ncert_pdf_skipped_supplementary", path=str(pdf_path))
+                logger.info(
+                    "SKIP PDF   | grade=%s | subject=%s | book=%s | pdf=%s | reason=supplementary",
+                    grade,
+                    subject,
+                    book,
+                    pdf_path.name,
+                )
                 continue
 
             chapter, unit_name, topic_name = self._infer_pdf_labels(first_page_text, pdf_path)
@@ -215,6 +315,16 @@ class NcertIngestionService:
                 }
             )
             processed_pdf_count += 1
+
+            logger.info(
+                "DONE PDF   | grade=%s | subject=%s | book=%s | pdf=%s | chapter=%s | topic=%s",
+                grade,
+                subject,
+                book,
+                pdf_path.name,
+                chapter or "-",
+                topic_name or "-",
+            )
 
         return records, processed_pdf_count
 
@@ -391,8 +501,10 @@ class NcertIngestionService:
     def _normalize_dict(self, row: dict) -> dict:
         return {str(key).strip(): value for key, value in row.items()}
 
-    def _normalize_records(self, records: list[dict]) -> list[NcertContent]:
+    def _normalize_records(self, records: list[dict]) -> tuple[list[NcertContent], int]:
         rows: list[NcertContent] = []
+        skipped_non_english = 0
+
         for record in records:
             grade = self._clean(record.get("grade"))
             subject = self._clean(record.get("subject"))
@@ -433,6 +545,10 @@ class NcertIngestionService:
                 )
 
             for chunk in self._chunk_text(content):
+                if not self._is_probably_english_text(chunk):
+                    skipped_non_english += 1
+                    continue
+
                 rows.append(
                     NcertContent(
                         grade=grade,
@@ -451,7 +567,8 @@ class NcertIngestionService:
                         keywords=keywords,
                     )
                 )
-        return rows
+
+        return rows, skipped_non_english
 
     def _clean(self, value: object) -> str:
         return str(value or "").strip()
@@ -552,3 +669,56 @@ class NcertIngestionService:
             chunks.append(current)
 
         return [chunk for chunk in chunks if chunk.strip()]
+
+    def _derive_processing_context(
+        self,
+        records: list[dict],
+        file_path: Path | None = None,
+    ) -> tuple[str | None, str | None, str | None]:
+        grade: str | None = None
+        subject: str | None = None
+        book: str | None = None
+
+        for record in records:
+            if not grade:
+                value = self._clean(record.get("grade"))
+                grade = value or None
+
+            if not subject:
+                value = self._clean(record.get("subject"))
+                subject = value or None
+
+            if not book:
+                value = self._clean(record.get("book"))
+                if not value:
+                    value = self._clean(record.get("source_title"))
+                book = value or None
+
+            if grade and subject and book:
+                break
+
+        if not book and file_path is not None:
+            book = file_path.stem
+
+        return grade, subject, book
+
+    def _is_probably_english_text(self, text: str) -> bool:
+        if not text or not text.strip():
+            return False
+
+        total_alpha = 0
+        non_latin_alpha = 0
+
+        for ch in text:
+            if not ch.isalpha():
+                continue
+
+            total_alpha += 1
+            char_name = unicodedata.name(ch, "")
+            if "LATIN" not in char_name:
+                non_latin_alpha += 1
+
+        if total_alpha == 0:
+            return False
+
+        return non_latin_alpha == 0
