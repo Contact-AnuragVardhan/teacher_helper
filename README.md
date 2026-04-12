@@ -1,20 +1,34 @@
 # Teacher Helper
 
-Teacher Helper is a FastAPI-based WhatsApp lesson-planning backend that keeps the core menu flow stable:
+Teacher Helper is a FastAPI-based WhatsApp lesson-planning backend for Indian K-12 teachers. It supports a stable WhatsApp menu flow, NCERT-backed lesson planning, OpenAI-based generation with deterministic fallback, and teacher profile / lesson history management.
+
+## Release 1 project details
+
+- Facebook account name: **Ashley Pearson**
+- Called phone number: **+1 (555) 142-5215**
+- Release 1 commit / branch link: `Release-1`
+- Project link: `https://github.com/Contact-AnuragVardhan/teacher_helper/tree/Release-1`
+
+## Core menu flow
+
+The current WhatsApp menu flow is:
 
 - `1 → New Lesson`
-- `2 → My Lessons`
+- `2 → All Lessons`
 - `3 → My Profile`
 
-The backend stays monolithic and maintainable while providing:
+## Features
 
-- deterministic NCERT ingestion and retrieval
-- prompt assembly grounded in retrieved NCERT snippets
-- LLM provider abstraction with deterministic fallback
-- configurable duplicate lesson policy
-- SQLite + PostgreSQL readiness
-- structured logging
-- broader automated tests
+- WhatsApp-first lesson planning flow
+- NCERT ingestion and retrieval
+- Prompt assembly grounded in retrieved NCERT snippets
+- OpenAI provider integration with deterministic fallback
+- Teacher profile management
+- Saved lesson retrieval through **All Lessons**
+- Configurable duplicate lesson policy
+- SQLite for local development, PostgreSQL-ready for deployment
+- Structured logging
+- Automated tests
 
 ## Requirements
 
@@ -35,7 +49,7 @@ cp .env.example .env
 Minimal variables:
 
 - `DATABASE_URL`
-- `OPENAI_API_KEY`
+- `OPENAI_API_KEY` if using OpenAI
 - `LLM_PROVIDER`
 - `DUPLICATE_LESSON_POLICY`
 - `SESSION_TIMEOUT_MINUTES`
@@ -47,6 +61,7 @@ Useful optional variables:
 - `SUPPORTED_LANGUAGES`
 - `LOG_LEVEL`
 - `ALLOW_ORIGINS`
+- `RESET_DB_ON_START`
 
 ## SQLite example
 
@@ -55,7 +70,8 @@ DATABASE_URL="sqlite:///./teacher_helper.db"
 LLM_PROVIDER="deterministic"
 DUPLICATE_LESSON_POLICY="reject"
 SESSION_TIMEOUT_MINUTES="30"
-SUPPORTED_LANGUAGES="English"
+SUPPORTED_LANGUAGES="English,Hinglish"
+RESET_DB_ON_START=false
 ```
 
 ## PostgreSQL example
@@ -67,12 +83,13 @@ OPENAI_API_KEY="your_api_key"
 OPENAI_MODEL="gpt-4o-mini"
 DUPLICATE_LESSON_POLICY="overwrite"
 SESSION_TIMEOUT_MINUTES="45"
-SUPPORTED_LANGUAGES="English"
+SUPPORTED_LANGUAGES="English,Hinglish"
+RESET_DB_ON_START=false
 ```
 
 ## Run the app
 
-Then start the server:
+Start the server:
 
 ```bash
 uvicorn app.main:app --reload
@@ -100,10 +117,9 @@ Use this to keep existing data and only create missing tables:
 RESET_DB_ON_START=false
 ```
 
-
 ## NCERT ingestion
 
-Place source files in a local folder. JSON and CSV are both supported.
+The project supports NCERT ingestion from local source data.
 
 Expected fields per record:
 
@@ -115,7 +131,7 @@ Expected fields per record:
 - `content` or `content_chunk`
 - `keywords` (optional)
 
-Sample files are included in `sample_data/`.
+If sample files are available in `sample_data/`, you can ingest them directly.
 
 Ingest a single file:
 
@@ -146,20 +162,26 @@ pytest
 ### Main menu
 
 ```bash
-curl -X POST http://127.0.0.1:8000/webhook/whatsapp   -H "Content-Type: application/json"   -d '{"from": "+15550001111", "body": "1"}'
+curl -X POST http://127.0.0.1:8000/webhook/whatsapp \
+  -H "Content-Type: application/json" \
+  -d '{"from": "+15551425215", "body": "1"}'
 ```
 
 ### Profile setup
 
 ```bash
-curl -X POST http://127.0.0.1:8000/webhook/whatsapp   -H "Content-Type: application/json"   -d '{"from": "+15550001111", "body": "My Profile"}'
+curl -X POST http://127.0.0.1:8000/webhook/whatsapp \
+  -H "Content-Type: application/json" \
+  -d '{"from": "+15551425215", "body": "My Profile"}'
 ```
 
 ### Lesson generation API
 
 ```bash
-curl -X POST http://127.0.0.1:8000/lesson/generate   -H "Content-Type: application/json"   -d '{
-        "whatsapp_number": "+15550001111",
+curl -X POST http://127.0.0.1:8000/lesson/generate \
+  -H "Content-Type: application/json" \
+  -d '{
+        "whatsapp_number": "+15551425215",
         "topic": "Plants",
         "duration_minutes": 35
       }'
@@ -167,8 +189,15 @@ curl -X POST http://127.0.0.1:8000/lesson/generate   -H "Content-Type: applicati
 
 ## Behavioral notes
 
-- Preferred language stays English-only unless `SUPPORTED_LANGUAGES` is explicitly broadened.
-- `My Lessons` still uses exact lesson-name retrieval for the current teacher.
-- If `LLM_PROVIDER=openai` but no API key is configured, the app still works through deterministic generation.
+- The application supports English and can be configured for Hinglish when enabled in `SUPPORTED_LANGUAGES`.
+- **All Lessons** is the current menu path for retrieving saved lessons.
+- If `LLM_PROVIDER=openai` but no API key is configured, the app can still work through deterministic generation.
 - If the LLM call fails, generation falls back to the deterministic provider automatically.
 - Session inactivity beyond `SESSION_TIMEOUT_MINUTES` safely resets the conversation state to `MAIN_MENU`.
+- For NCERT-matched topics, the generated lesson can include a `Source:` block based on the matched NCERT metadata.
+
+## Release 1 handoff link
+
+Project / release link:
+
+`https://github.com/Contact-AnuragVardhan/teacher_helper/tree/Release-1`
