@@ -1,48 +1,62 @@
 from app.models.lesson_plan import LessonPlan
 
 
-def create_teacher(client):
+def create_teacher(
+    client,
+    phone: str,
+    name: str = "Anurag",
+    grade: str = "6",
+    subject: str = "Science",
+    language: str = "English",
+):
     response = client.post(
         "/teacher",
         json={
-            "whatsapp_number": "+15556667777",
-            "teacher_name": "Anurag",
-            "default_grade": "5",
-            "default_subject": "English",
-            "preferred_language": "English",
+            "whatsapp_number": phone,
+            "teacher_name": name,
+            "default_grade": grade,
+            "default_subject": subject,
+            "preferred_language": language,
         },
     )
     assert response.status_code == 200
-    teacher = response.json()
-    return teacher
+    return response.json()
 
 
-def save_library_lesson(client, teacher_id: int, lesson_name: str = "Components of Food Intro"):
+def save_library_lesson(
+    client,
+    teacher_id: int,
+    lesson_name: str,
+    grade: str = "6",
+    subject: str = "Science",
+    topic: str = "Components of Food",
+    duration_minutes: int = 40,
+    source_type: str = "ncert_syllabus",
+):
     payload = {
         "teacher_id": f"teacher-{teacher_id:03d}",
         "lesson_name": lesson_name,
-        "grade": "6",
-        "subject": "Science",
-        "topic": "Components of Food",
-        "duration_minutes": 40,
-        "source_type": "ncert_syllabus",
+        "grade": grade,
+        "subject": subject,
+        "topic": topic,
+        "duration_minutes": duration_minutes,
+        "source_type": source_type,
         "source_reference": {
-            "grade": "6",
-            "subject": "Science",
-            "topic_name": "Components of Food",
+            "grade": grade,
+            "subject": subject,
+            "topic_name": topic,
         },
         "lesson_json": {
-            "lesson_title": "Grade 6 Science – Components of Food",
-            "objective": "Students understand major nutrients and balanced diet.",
-            "opening": "Ask students what they ate today.",
-            "main_teaching": "Explain nutrients, balanced diet, and deficiency diseases.",
-            "activity": "Students sort foods into nutrient groups.",
+            "lesson_title": f"Grade {grade} {subject} – {topic}",
+            "objective": f"Students understand {topic}.",
+            "opening": f"Introduce {topic}.",
+            "main_teaching": f"Teach {topic}.",
+            "activity": f"Practice {topic}.",
             "qa": [
-                "What is a balanced diet?",
-                "Why do we need nutrients?",
-                "Name one deficiency disease.",
+                f"What is {topic}?",
+                f"Why is {topic} important?",
             ],
-            "closing": "Summarize healthy food choices.",
+            "closing": f"Summarize {topic}.",
         },
     }
     response = client.post("/api/library/lessons", json=payload)
@@ -51,9 +65,14 @@ def save_library_lesson(client, teacher_id: int, lesson_name: str = "Components 
 
 
 def test_post_api_library_lessons_saves_lesson(client, db_session):
-    teacher = create_teacher(client)
+    teacher = create_teacher(client, "+15556667771")
 
-    response = save_library_lesson(client, teacher["id"])
+    response = save_library_lesson(
+        client,
+        teacher["id"],
+        lesson_name="Components of Food Intro",
+        topic="Components of Food",
+    )
     body = response.json()
 
     assert body["success"] is True
@@ -70,8 +89,13 @@ def test_post_api_library_lessons_saves_lesson(client, db_session):
 
 
 def test_get_api_library_lessons_by_id_returns_saved_lesson(client):
-    teacher = create_teacher(client)
-    save_response = save_library_lesson(client, teacher["id"])
+    teacher = create_teacher(client, "+15556667772")
+    save_response = save_library_lesson(
+        client,
+        teacher["id"],
+        lesson_name="Components of Food Intro",
+        topic="Components of Food",
+    )
     lesson_id = save_response.json()["lesson_id"]
 
     response = client.get(f"/api/library/lessons/{lesson_id}")
@@ -88,39 +112,243 @@ def test_get_api_library_lessons_by_id_returns_saved_lesson(client):
     assert body["source_type"] == "ncert_syllabus"
     assert body["source_reference"]["topic_name"] == "Components of Food"
     assert body["lesson_json"]["lesson_title"] == "Grade 6 Science – Components of Food"
-    assert body["lesson_json"]["closing"] == "Summarize healthy food choices."
+    assert body["lesson_json"]["closing"] == "Summarize Components of Food."
 
 
-def test_get_api_library_search_returns_filtered_results(client):
-    teacher = create_teacher(client)
-    save_library_lesson(client, teacher["id"], lesson_name="Components of Food Intro")
+def test_get_api_library_search_without_any_params_returns_all_lessons(client):
+    teacher_one = create_teacher(client, "+15556667773", name="Teacher One")
+    teacher_two = create_teacher(client, "+15556667774", name="Teacher Two")
 
-    second_payload = {
-        "teacher_id": f"teacher-{teacher['id']:03d}",
-        "lesson_name": "Plant Life Intro",
-        "grade": "6",
-        "subject": "Science",
-        "topic": "Plant Life",
-        "duration_minutes": 35,
-        "source_type": "generated",
-        "source_reference": {
-            "grade": "6",
-            "subject": "Science",
-            "topic_name": "Plant Life",
-        },
-        "lesson_json": {
-            "lesson_title": "Grade 6 Science – Plant Life",
-            "objective": "Students understand basic plant parts.",
-            "opening": "Ask students to name a plant.",
-            "main_teaching": "Explain roots, stem, leaf, and flower.",
-            "activity": "Label plant parts.",
-            "qa": ["What do roots do?"],
-            "closing": "Summarize plant parts.",
-        },
+    save_library_lesson(
+        client,
+        teacher_one["id"],
+        lesson_name="Components of Food Intro",
+        topic="Components of Food",
+    )
+    save_library_lesson(
+        client,
+        teacher_one["id"],
+        lesson_name="Plant Life Intro",
+        topic="Plant Life",
+    )
+    save_library_lesson(
+        client,
+        teacher_two["id"],
+        lesson_name="Fractions Intro",
+        subject="Mathematics",
+        topic="Fractions",
+        source_type="generated",
+    )
+
+    response = client.get("/api/library/search")
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["count"] == 3
+
+    lesson_names = {item["lesson_name"] for item in body["items"]}
+    assert lesson_names == {
+        "Components of Food Intro",
+        "Plant Life Intro",
+        "Fractions Intro",
     }
 
-    second_response = client.post("/api/library/lessons", json=second_payload)
-    assert second_response.status_code == 200
+    teacher_ids = {item["teacher_id"] for item in body["items"]}
+    assert teacher_ids == {
+        f"teacher-{teacher_one['id']:03d}",
+        f"teacher-{teacher_two['id']:03d}",
+    }
+
+
+def test_get_api_library_search_by_teacher_id_only_returns_that_teachers_lessons(client):
+    teacher_one = create_teacher(client, "+15556667775", name="Teacher One")
+    teacher_two = create_teacher(client, "+15556667776", name="Teacher Two")
+
+    save_library_lesson(
+        client,
+        teacher_one["id"],
+        lesson_name="Components of Food Intro",
+        topic="Components of Food",
+    )
+    save_library_lesson(
+        client,
+        teacher_one["id"],
+        lesson_name="Plant Life Intro",
+        topic="Plant Life",
+    )
+    save_library_lesson(
+        client,
+        teacher_two["id"],
+        lesson_name="Fractions Intro",
+        subject="Mathematics",
+        topic="Fractions",
+        source_type="generated",
+    )
+
+    response = client.get(
+        "/api/library/search",
+        params={"teacher_id": f"teacher-{teacher_one['id']:03d}"},
+    )
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["count"] == 2
+    assert {item["lesson_name"] for item in body["items"]} == {
+        "Components of Food Intro",
+        "Plant Life Intro",
+    }
+    assert {item["teacher_id"] for item in body["items"]} == {
+        f"teacher-{teacher_one['id']:03d}",
+    }
+
+
+def test_get_api_library_search_by_topic_only_returns_matching_lessons(client):
+    teacher_one = create_teacher(client, "+15556667777", name="Teacher One")
+    teacher_two = create_teacher(client, "+15556667778", name="Teacher Two")
+
+    save_library_lesson(
+        client,
+        teacher_one["id"],
+        lesson_name="Components of Food Intro",
+        topic="Components of Food",
+    )
+    save_library_lesson(
+        client,
+        teacher_one["id"],
+        lesson_name="Plant Life Intro",
+        topic="Plant Life",
+    )
+    save_library_lesson(
+        client,
+        teacher_two["id"],
+        lesson_name="Components Deep Dive",
+        topic="Components of Food",
+        source_type="generated",
+    )
+
+    response = client.get(
+        "/api/library/search",
+        params={"topic": "Components of Food"},
+    )
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["count"] == 2
+    assert {item["lesson_name"] for item in body["items"]} == {
+        "Components of Food Intro",
+        "Components Deep Dive",
+    }
+    assert all(item["topic"] == "Components of Food" for item in body["items"])
+
+
+def test_get_api_library_search_by_grade_and_subject_without_teacher_returns_cross_teacher_matches(client):
+    teacher_one = create_teacher(client, "+15556667779", name="Teacher One")
+    teacher_two = create_teacher(client, "+15556667780", name="Teacher Two")
+
+    save_library_lesson(
+        client,
+        teacher_one["id"],
+        lesson_name="Components of Food Intro",
+        grade="6",
+        subject="Science",
+        topic="Components of Food",
+    )
+    save_library_lesson(
+        client,
+        teacher_two["id"],
+        lesson_name="Plant Life Intro",
+        grade="6",
+        subject="Science",
+        topic="Plant Life",
+    )
+    save_library_lesson(
+        client,
+        teacher_two["id"],
+        lesson_name="Fractions Intro",
+        grade="6",
+        subject="Mathematics",
+        topic="Fractions",
+        source_type="generated",
+    )
+
+    response = client.get(
+        "/api/library/search",
+        params={
+            "grade": "6",
+            "subject": "Science",
+        },
+    )
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["count"] == 2
+    assert {item["lesson_name"] for item in body["items"]} == {
+        "Components of Food Intro",
+        "Plant Life Intro",
+    }
+    assert all(item["grade"] == "6" for item in body["items"])
+    assert all(item["subject"] == "Science" for item in body["items"])
+
+
+def test_get_api_library_search_by_teacher_and_topic_returns_single_match(client):
+    teacher_one = create_teacher(client, "+15556667781", name="Teacher One")
+    teacher_two = create_teacher(client, "+15556667782", name="Teacher Two")
+
+    save_library_lesson(
+        client,
+        teacher_one["id"],
+        lesson_name="Components of Food Intro",
+        topic="Components of Food",
+    )
+    save_library_lesson(
+        client,
+        teacher_one["id"],
+        lesson_name="Plant Life Intro",
+        topic="Plant Life",
+    )
+    save_library_lesson(
+        client,
+        teacher_two["id"],
+        lesson_name="Components Deep Dive",
+        topic="Components of Food",
+        source_type="generated",
+    )
+
+    response = client.get(
+        "/api/library/search",
+        params={
+            "teacher_id": f"teacher-{teacher_one['id']:03d}",
+            "topic": "Plant Life",
+        },
+    )
+    assert response.status_code == 200
+
+    body = response.json()
+    assert body["count"] == 1
+    assert body["items"][0]["lesson_name"] == "Plant Life Intro"
+    assert body["items"][0]["topic"] == "Plant Life"
+    assert body["items"][0]["teacher_id"] == f"teacher-{teacher_one['id']:03d}"
+
+
+def test_get_api_library_search_by_multiple_filters_returns_single_match(client):
+    teacher = create_teacher(client, "+15556667783")
+
+    save_library_lesson(
+        client,
+        teacher["id"],
+        lesson_name="Components of Food Intro",
+        grade="6",
+        subject="Science",
+        topic="Components of Food",
+    )
+    save_library_lesson(
+        client,
+        teacher["id"],
+        lesson_name="Plant Life Intro",
+        grade="6",
+        subject="Science",
+        topic="Plant Life",
+    )
 
     response = client.get(
         "/api/library/search",
@@ -129,6 +357,7 @@ def test_get_api_library_search_returns_filtered_results(client):
             "lesson_name": "Components of Food Intro",
             "grade": "6",
             "subject": "Science",
+            "topic": "Components of Food",
         },
     )
     assert response.status_code == 200
@@ -143,8 +372,13 @@ def test_get_api_library_search_returns_filtered_results(client):
 
 
 def test_put_api_library_lessons_updates_lesson_name_and_json(client):
-    teacher = create_teacher(client)
-    save_response = save_library_lesson(client, teacher["id"])
+    teacher = create_teacher(client, "+15556667784")
+    save_response = save_library_lesson(
+        client,
+        teacher["id"],
+        lesson_name="Components of Food Intro",
+        topic="Components of Food",
+    )
     lesson_id = save_response.json()["lesson_id"]
 
     update_payload = {
@@ -188,7 +422,7 @@ def test_put_api_library_lessons_updates_lesson_name_and_json(client):
 
 
 def test_get_api_library_lessons_by_id_returns_404_for_missing_lesson(client):
-    create_teacher(client)
+    create_teacher(client, "+15556667785")
 
     response = client.get("/api/library/lessons/999999")
     assert response.status_code == 404
