@@ -290,23 +290,30 @@ def get_library_lesson(lesson_id: str, db: Session = Depends(get_db)) -> dict[st
 
 @router.get("/search")
 def search_library_lessons(
-    teacher_id: str = Query(...),
+    teacher_id: str | None = Query(None),
     lesson_name: str | None = None,
     grade: str | None = None,
     subject: str | None = None,
+    topic: str | None = None,
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    teacher = _get_teacher_or_404(db, teacher_id)
+    teacher = None
+
     log_event(
         logger,
         "library_lesson_search_requested",
-        teacher_id=teacher.id,
+        teacher_id=teacher_id,
         lesson_name=lesson_name,
         grade=grade,
         subject=subject,
+        topic=topic,
     )
 
-    query = db.query(LessonPlan).filter(LessonPlan.teacher_id == teacher.id)
+    query = db.query(LessonPlan)
+
+    if teacher_id:
+        teacher = _get_teacher_or_404(db, teacher_id)
+        query = query.filter(LessonPlan.teacher_id == teacher.id)
 
     if lesson_name:
         query = query.filter(func.lower(LessonPlan.lesson_name) == lesson_name.strip().lower())
@@ -314,12 +321,15 @@ def search_library_lessons(
         query = query.filter(LessonPlan.grade == grade.strip())
     if subject:
         query = query.filter(LessonPlan.subject == normalize_subject(subject))
+    if topic:
+        query = query.filter(func.lower(LessonPlan.topic) == topic.strip().lower())
 
     rows = query.order_by(LessonPlan.updated_at.desc()).all()
 
     items = [
         {
             "lesson_id": str(row.id),
+            "teacher_id": _format_teacher_id(row.teacher_id),
             "lesson_name": row.lesson_name,
             "grade": row.grade,
             "subject": row.subject,
@@ -330,7 +340,12 @@ def search_library_lessons(
         for row in rows
     ]
 
-    log_event(logger, "library_lesson_search_completed", teacher_id=teacher.id, count=len(items))
+    log_event(
+        logger,
+        "library_lesson_search_completed",
+        teacher_id=teacher.id if teacher else None,
+        count=len(items),
+    )
     return {"count": len(items), "items": items}
 
 
