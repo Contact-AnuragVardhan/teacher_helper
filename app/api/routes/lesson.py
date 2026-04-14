@@ -12,6 +12,7 @@ from app.schemas.lesson import (
     LessonSaveRequest,
 )
 from app.services.lesson_generator import LessonGeneratorService
+from app.services.lesson_payload_builder import LessonPayloadBuilder
 from app.utils.subject_normalization import normalize_subject
 
 router = APIRouter(prefix="/lesson", tags=["lesson"])
@@ -85,6 +86,16 @@ def save_lesson(payload: LessonSaveRequest, db: Session = Depends(get_db)) -> Le
         log_event(logger, "lesson_save_invalid_name", whatsapp_number=payload.whatsapp_number)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="lesson_name cannot be blank.")
 
+    lesson_payload = LessonPayloadBuilder().build(
+        teacher_id=teacher.id,
+        lesson_name=payload.lesson_name,
+        grade=teacher.default_grade,
+        subject=teacher.default_subject,
+        topic=payload.topic,
+        duration_minutes=payload.duration_minutes,
+        lesson_text=payload.lesson_text,
+    )
+
     repo = LessonRepository(db)
     lesson = repo.create_or_update_by_policy(
         teacher_id=teacher.id,
@@ -94,6 +105,7 @@ def save_lesson(payload: LessonSaveRequest, db: Session = Depends(get_db)) -> Le
         subject=teacher.default_subject,
         duration_minutes=payload.duration_minutes,
         lesson_text=payload.lesson_text,
+        lesson_payload=lesson_payload,
     )
     if lesson is None:
         log_event(

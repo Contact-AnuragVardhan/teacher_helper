@@ -93,6 +93,7 @@ class LessonRepository:
         subject: str,
         duration_minutes: int,
         lesson_text: str,
+        lesson_payload: dict | None,
     ) -> LessonPlan:
         lesson = LessonPlan(
             teacher_id=teacher_id,
@@ -102,6 +103,7 @@ class LessonRepository:
             subject=normalize_subject(subject),
             duration_minutes=duration_minutes,
             lesson_text=lesson_text,
+            lesson_payload=lesson_payload,
         )
         self.db.add(lesson)
         try:
@@ -134,12 +136,14 @@ class LessonRepository:
         subject: str,
         duration_minutes: int,
         lesson_text: str,
+        lesson_payload: dict | None,
     ) -> LessonPlan:
         lesson.topic = topic.strip()
         lesson.grade = grade.strip()
         lesson.subject = normalize_subject(subject)
         lesson.duration_minutes = duration_minutes
         lesson.lesson_text = lesson_text
+        lesson.lesson_payload = lesson_payload
         self.db.add(lesson)
         self.db.commit()
         self.db.refresh(lesson)
@@ -162,6 +166,7 @@ class LessonRepository:
         subject: str,
         duration_minutes: int,
         lesson_text: str,
+        lesson_payload: dict | None,
     ) -> LessonPlan | None:
         settings = get_settings()
         existing = self.get_by_teacher_and_name(teacher_id, lesson_name)
@@ -187,6 +192,7 @@ class LessonRepository:
                 subject=subject,
                 duration_minutes=duration_minutes,
                 lesson_text=lesson_text,
+                lesson_payload=lesson_payload,
             )
 
         log_event(
@@ -203,4 +209,5 @@ class LessonRepository:
             subject=subject,
             duration_minutes=duration_minutes,
             lesson_text=lesson_text,
+            lesson_payload=lesson_payload,
         )

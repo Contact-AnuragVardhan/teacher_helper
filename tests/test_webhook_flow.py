@@ -147,9 +147,9 @@ def test_hinglish_profile_generates_hinglish_lesson(client):
     assert "samajhne ki basic understanding" in payload["reply"]
 
 
-# =========================
-# ALL LESSONS TESTS
-# =========================
+
+
+
 
 def test_all_lessons_with_10_or_less_returns_whatsapp_list(client):
     create_profile_via_webhook(client)

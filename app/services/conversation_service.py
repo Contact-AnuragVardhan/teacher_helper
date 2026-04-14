@@ -9,6 +9,7 @@ from app.repositories.lesson_repository import LessonRepository
 from app.repositories.session_repository import SessionRepository
 from app.repositories.teacher_repository import TeacherRepository
 from app.services.lesson_generator import LessonGeneratorService
+from app.services.lesson_payload_builder import LessonPayloadBuilder
 from app.state_machine.states import ConversationState
 from app.utils.profile_validation import validate_profile_grade, validate_profile_subject
 from app.utils.subject_normalization import normalize_subject
@@ -32,6 +33,7 @@ class ConversationService:
         self.lesson_repo = LessonRepository(db)
         self.session_repo = SessionRepository(db)
         self.lesson_generator = LessonGeneratorService(db)
+        self.lesson_payload_builder = LessonPayloadBuilder()
 
     def handle_message(self, whatsapp_number: str, incoming_text: str) -> ConversationReply:
         session, was_reset = self.session_repo.get_or_create(whatsapp_number)
@@ -519,6 +521,16 @@ class ConversationService:
         lesson_grade = (session.temp_profile_grade or "").strip() or teacher.default_grade
         lesson_subject = (session.temp_profile_subject or "").strip() or teacher.default_subject
 
+        lesson_payload = self.lesson_payload_builder.build(
+            teacher_id=teacher.id,
+            lesson_name=text,
+            grade=lesson_grade,
+            subject=lesson_subject,
+            topic=session.temp_topic or "",
+            duration_minutes=session.temp_duration_minutes or 0,
+            lesson_text=session.temp_generated_lesson or "",
+        )
+
         lesson = self.lesson_repo.create_or_update_by_policy(
             teacher_id=teacher.id,
             lesson_name=text,
@@ -527,6 +539,7 @@ class ConversationService:
             subject=lesson_subject,
             duration_minutes=session.temp_duration_minutes or 0,
             lesson_text=session.temp_generated_lesson or "",
+            lesson_payload=lesson_payload,
         )
         if lesson is None:
             return self._reply(messages.DUPLICATE_LESSON_NAME, ConversationState.NEW_LESSON_NAME)

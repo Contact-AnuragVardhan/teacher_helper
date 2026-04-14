@@ -17,13 +17,13 @@ class NcertContent(Base):
     grade: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     subject: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
 
-    # Legacy / compatibility fields
+    
     chapter: Mapped[str | None] = mapped_column(String(255), nullable=True)
     topic: Mapped[str | None] = mapped_column(String(255), nullable=True)
     source_title: Mapped[str] = mapped_column(String(255), nullable=False)
     content_chunk: Mapped[str] = mapped_column(Text, nullable=False)
 
-    # New syllabus-grounding fields
+    
     book: Mapped[str | None] = mapped_column(String(255), nullable=True)
     book_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     unit_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
