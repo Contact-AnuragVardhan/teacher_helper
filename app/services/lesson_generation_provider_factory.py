@@ -3,13 +3,13 @@ from app.services.lesson_generation_provider import LessonGenerationProvider
 from app.services.llm_provider_openai import OpenAILessonGenerationProvider
 from app.services.model_profiles import resolve_model_profile
 
-# add this later when you implement it
-# from app.services.google_lesson_generation_provider import GoogleLessonGenerationProvider
-# from app.services.deterministic_provider import DeterministicLessonGenerationProvider
+
+
+
 
 
 def build_lesson_generation_provider(settings: Settings) -> LessonGenerationProvider:
-    # keep deterministic as an explicit local override
+    
     if settings.llm_provider == "deterministic":
         from app.services.deterministic_provider import DeterministicLessonGenerationProvider
         return DeterministicLessonGenerationProvider(settings)

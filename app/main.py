@@ -12,7 +12,8 @@ from app.core.config import get_settings
 from app.core.logging import configure_logging, log_event
 from app.db.base import Base
 from app.db.session import engine
-import app.models  # noqa: F401
+import app.models
+from app.api.routes.library import router as library_router
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -44,6 +45,7 @@ app.add_middleware(
 app.include_router(webhook_router)
 app.include_router(teacher_router)
 app.include_router(lesson_router)
+app.include_router(library_router)
 
 
 @app.exception_handler(HTTPException)
