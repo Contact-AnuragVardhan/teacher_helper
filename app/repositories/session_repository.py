@@ -68,6 +68,7 @@ class SessionRepository:
         session.temp_duration_minutes = None
         session.temp_generated_lesson = None
         session.temp_lesson_name = None
+        session.temp_selected_lesson_id = None
         log_event(logger, "session_clear_temp_lesson", whatsapp_number=session.whatsapp_number)
         return self.save(session)
 
@@ -84,6 +85,7 @@ class SessionRepository:
         session.temp_duration_minutes = None
         session.temp_generated_lesson = None
         session.temp_lesson_name = None
+        session.temp_selected_lesson_id = None
         session.temp_profile_name = None
         session.temp_profile_grade = None
         session.temp_profile_subject = None

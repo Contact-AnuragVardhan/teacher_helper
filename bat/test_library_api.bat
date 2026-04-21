@@ -270,40 +270,41 @@ Assert-True ($saveResponseTwo.success -eq $true) 'Second POST /api/library/lesso
 Assert-True ($saveResponseThree.success -eq $true) 'Third POST /api/library/lessons did not return success=true.'
 Assert-True ($getResponse.lesson_id -eq $lessonIdOne) 'GET /api/library/lessons/{lesson_id} returned unexpected lesson_id.'
 
-$allLessonNames = Get-LessonNames $searchAllResponse
+$allLessonNames = @(Get-LessonNames $searchAllResponse)
 Assert-True ((Get-ItemCount $searchAllResponse) -ge 3) 'GET /api/library/search with no params returned fewer than 3 lessons.'
 Assert-True ($allLessonNames -contains $lessonOneName) 'No-param search did not include lesson one.'
 Assert-True ($allLessonNames -contains $lessonTwoName) 'No-param search did not include lesson two.'
 Assert-True ($allLessonNames -contains $lessonThreeName) 'No-param search did not include lesson three.'
 
-$teacherOnlyLessonNames = Get-LessonNames $searchTeacherOnlyResponse
-$teacherOnlyTeacherIds = Get-TeacherIds $searchTeacherOnlyResponse
+$teacherOnlyLessonNames = @(Get-LessonNames $searchTeacherOnlyResponse)
+$teacherOnlyTeacherIds = @(Get-TeacherIds $searchTeacherOnlyResponse)
+$uniqueTeacherOnlyTeacherIds = @($teacherOnlyTeacherIds | Select-Object -Unique)
 Assert-True ((Get-ItemCount $searchTeacherOnlyResponse) -eq 2) 'teacher_id-only search did not return exactly 2 lessons.'
 Assert-True ($teacherOnlyLessonNames -contains $lessonOneName) 'teacher_id-only search missing lesson one.'
 Assert-True ($teacherOnlyLessonNames -contains $lessonTwoName) 'teacher_id-only search missing lesson two.'
 Assert-True (-not ($teacherOnlyLessonNames -contains $lessonThreeName)) 'teacher_id-only search incorrectly included teacher two lesson.'
-Assert-True (($teacherOnlyTeacherIds | Select-Object -Unique).Count -eq 1) 'teacher_id-only search returned multiple teacher ids.'
-Assert-True (($teacherOnlyTeacherIds | Select-Object -Unique)[0] -eq $teacherOneId) 'teacher_id-only search returned wrong teacher id.'
+Assert-True ($uniqueTeacherOnlyTeacherIds.Count -eq 1) 'teacher_id-only search returned multiple teacher ids.'
+Assert-True ($uniqueTeacherOnlyTeacherIds[0] -eq $teacherOneId) 'teacher_id-only search returned wrong teacher id.'
 
-$topicOnlyLessonNames = Get-LessonNames $searchTopicOnlyResponse
+$topicOnlyLessonNames = @(Get-LessonNames $searchTopicOnlyResponse)
 Assert-True ((Get-ItemCount $searchTopicOnlyResponse) -ge 1) 'topic-only search returned no lessons.'
 Assert-True ($topicOnlyLessonNames -contains $lessonOneName) 'topic-only search missing expected lesson.'
 Assert-True (@($searchTopicOnlyResponse.items | Where-Object { $_.topic -ne 'Components of Food' }).Count -eq 0) 'topic-only search returned a non-matching topic.'
 
-$gradeSubjectLessonNames = Get-LessonNames $searchGradeSubjectResponse
+$gradeSubjectLessonNames = @(Get-LessonNames $searchGradeSubjectResponse)
 Assert-True ((Get-ItemCount $searchGradeSubjectResponse) -ge 2) 'grade+subject search returned too few lessons.'
 Assert-True ($gradeSubjectLessonNames -contains $lessonOneName) 'grade+subject search missing lesson one.'
 Assert-True ($gradeSubjectLessonNames -contains $lessonTwoName) 'grade+subject search missing lesson two.'
 Assert-True (-not ($gradeSubjectLessonNames -contains $lessonThreeName)) 'grade+subject search incorrectly included mathematics lesson.'
 Assert-True (@($searchGradeSubjectResponse.items | Where-Object { $_.grade -ne '6' -or $_.subject -ne 'Science' }).Count -eq 0) 'grade+subject search returned a non-matching item.'
 
-$teacherTopicLessonNames = Get-LessonNames $searchTeacherTopicResponse
+$teacherTopicLessonNames = @(Get-LessonNames $searchTeacherTopicResponse)
 Assert-True ((Get-ItemCount $searchTeacherTopicResponse) -eq 1) 'teacher_id+topic search did not return exactly 1 lesson.'
-Assert-True ($teacherTopicLessonNames[0] -eq $lessonTwoName) 'teacher_id+topic search returned the wrong lesson.'
+Assert-True ($teacherTopicLessonNames -contains $lessonTwoName) 'teacher_id+topic search returned the wrong lesson.'
 
-$multiFilterLessonNames = Get-LessonNames $searchMultiFilterResponse
+$multiFilterLessonNames = @(Get-LessonNames $searchMultiFilterResponse)
 Assert-True ((Get-ItemCount $searchMultiFilterResponse) -eq 1) 'multi-filter search did not return exactly 1 lesson.'
-Assert-True ($multiFilterLessonNames[0] -eq $lessonOneName) 'multi-filter search returned the wrong lesson.'
+Assert-True ($multiFilterLessonNames -contains $lessonOneName) 'multi-filter search returned the wrong lesson.'
 
 Assert-True ($updateResponse.success -eq $true) 'PUT /api/library/lessons/{lesson_id} did not return success=true.'
 Assert-True ($confirmResponse.lesson_name -eq $updatedLessonOneName) 'Updated lesson_name was not persisted.'

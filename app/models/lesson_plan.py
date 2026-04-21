@@ -23,7 +23,11 @@ class LessonPlan(Base):
     lesson_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
     )
 
     teacher = relationship("TeacherProfile", back_populates="lessons")
+    shares = relationship("LessonShare", back_populates="lesson", cascade="all, delete-orphan")
