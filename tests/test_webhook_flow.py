@@ -48,8 +48,7 @@ def test_successful_profile_creation(client, db_session):
     payload = response.json()
 
     assert payload["current_state"] == "MAIN_MENU"
-    assert "1 → New Lesson" in payload["reply"]
-    assert "2 → All Lessons" in payload["reply"]
+    assert "Please tap one option below." in payload["reply"]
 
     teacher = db_session.query(TeacherProfile).first()
     assert teacher.default_subject == "English"
@@ -144,7 +143,7 @@ def test_hinglish_profile_generates_hinglish_lesson(client):
     payload = response.json()
 
     assert payload["current_state"] == "NEW_LESSON_CONFIRM_SAVE"
-    assert "samajhne ki basic understanding" in payload["reply"]
+    assert "basic idea samajhna" in payload["reply"]
 
 
 
@@ -163,9 +162,11 @@ def test_all_lessons_with_10_or_less_returns_whatsapp_list(client):
     assert payload["outbound"]["type"] == "list"
 
     ids = [row["id"] for row in payload["outbound"]["rows"]]
+    titles = [row["title"] for row in payload["outbound"]["rows"]]
 
-    assert "Plants Basics" in ids
-    assert "Fractions Basics" in ids
+    assert any(item.startswith("lesson_id:") for item in ids)
+    assert "Plants Basics" in titles
+    assert "Fractions Basics" in titles
 
 
 def test_all_lessons_with_more_than_10_uses_numbered_fallback(client):
@@ -194,8 +195,9 @@ def test_retrieve_existing_lesson_by_number_from_fallback_list_works(client):
 
     payload = response.json()
 
-    assert payload["current_state"] == "MAIN_MENU"
+    assert payload["current_state"] == "LESSON_ACTION_MENU"
     assert "Lesson Title" in payload["reply"]
+    assert payload["outbound"]["type"] == "buttons"
 
 
 def test_invalid_lesson_number_keeps_state(client):
@@ -235,3 +237,47 @@ def test_duplicate_lesson_name_message_has_example(client):
     response = send(client, "Plants Basics")
 
     assert response.json()["reply"] == DUPLICATE_LESSON_NAME
+
+
+
+def test_owner_can_share_lesson_and_recipient_sees_starred_entry(client):
+    owner_phone = PHONE
+    recipient_phone = "+15550002222"
+
+    create_profile_via_webhook(client, phone=owner_phone)
+    create_profile_via_webhook(client, phone=recipient_phone)
+    create_saved_lesson(client, "Plants Basics", "Plants", phone=owner_phone)
+
+    open_list_response = send(client, "2", owner_phone)
+    lesson_row_id = open_list_response.json()["outbound"]["rows"][0]["id"]
+
+    send(client, lesson_row_id, owner_phone)
+    share_prompt = send(client, "lesson_action_share", owner_phone)
+    assert share_prompt.json()["current_state"] == "SHARE_LESSON_PHONE"
+
+    share_result = send(client, recipient_phone, owner_phone)
+    assert share_result.json()["current_state"] == "MAIN_MENU"
+    assert "was shared with" in share_result.json()["reply"]
+
+    recipient_list = send(client, "2", recipient_phone).json()
+    assert recipient_list["outbound"]["type"] == "list"
+    assert any(row["title"].startswith("*") for row in recipient_list["outbound"]["rows"])
+
+
+def test_owner_can_delete_lesson_from_action_menu(client):
+    create_profile_via_webhook(client)
+    create_saved_lesson(client, "Plants Basics", "Plants")
+
+    open_list_response = send(client, "2")
+    lesson_row_id = open_list_response.json()["outbound"]["rows"][0]["id"]
+
+    send(client, lesson_row_id)
+    delete_prompt = send(client, "lesson_action_delete")
+    assert delete_prompt.json()["current_state"] == "DELETE_LESSON_CONFIRM"
+
+    delete_result = send(client, "confirm_delete_lesson")
+    assert delete_result.json()["current_state"] == "MAIN_MENU"
+    assert "was deleted" in delete_result.json()["reply"]
+
+    lessons_after_delete = send(client, "2").json()
+    assert "do not have any saved or shared lessons yet" in lessons_after_delete["reply"]

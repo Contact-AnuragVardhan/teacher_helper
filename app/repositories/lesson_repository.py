@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -5,9 +7,29 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.logging import get_logger, log_event
 from app.models.lesson_plan import LessonPlan
+from app.models.lesson_share import LessonShare
+from app.models.teacher_profile import TeacherProfile
 from app.utils.subject_normalization import normalize_subject
 
 logger = get_logger(__name__)
+
+
+@dataclass
+class AccessibleLessonSummary:
+    lesson_id: int
+    lesson_name: str
+    display_title: str
+    is_shared: bool
+    shared_by_teacher_id: int | None = None
+    shared_by_teacher_name: str | None = None
+
+
+@dataclass
+class AccessibleLesson:
+    lesson: LessonPlan
+    is_shared: bool
+    shared_by_teacher_id: int | None = None
+    shared_by_teacher_name: str | None = None
 
 
 class LessonRepository:
@@ -51,35 +73,83 @@ class LessonRepository:
         )
         return lesson
 
+    def get_accessible_lesson_by_teacher_and_id(self, teacher_id: int, lesson_id: int) -> AccessibleLesson | None:
+        owned_lesson = self.get_by_teacher_and_id(teacher_id, lesson_id)
+        if owned_lesson:
+            return AccessibleLesson(lesson=owned_lesson, is_shared=False)
+
+        shared = (
+            self.db.query(LessonPlan, LessonShare, TeacherProfile)
+            .join(LessonShare, LessonShare.lesson_id == LessonPlan.id)
+            .join(TeacherProfile, TeacherProfile.id == LessonShare.shared_by_teacher_id)
+            .filter(
+                LessonPlan.id == lesson_id,
+                LessonShare.shared_with_teacher_id == teacher_id,
+            )
+            .first()
+        )
+        if not shared:
+            return None
+
+        lesson, share, shared_by_teacher = shared
+        return AccessibleLesson(
+            lesson=lesson,
+            is_shared=True,
+            shared_by_teacher_id=share.shared_by_teacher_id,
+            shared_by_teacher_name=shared_by_teacher.teacher_name,
+        )
+
     def list_titles_by_teacher(self, teacher_id: int) -> list[str]:
-        rows = (
-            self.db.query(LessonPlan.lesson_name)
-            .filter(LessonPlan.teacher_id == teacher_id)
-            .order_by(func.lower(LessonPlan.lesson_name))
-            .all()
-        )
-        titles = [row[0] for row in rows]
-        log_event(
-            logger,
-            "lesson_titles_listed",
-            teacher_id=teacher_id,
-            count=len(titles),
-        )
-        return titles
+        return [item.lesson_name for item in self.list_accessible_summaries_for_teacher(teacher_id)]
 
     def list_summaries_by_teacher(self, teacher_id: int) -> list[tuple[int, str]]:
-        rows = (
+        return [
+            (item.lesson_id, item.display_title)
+            for item in self.list_accessible_summaries_for_teacher(teacher_id)
+        ]
+
+    def list_accessible_summaries_for_teacher(self, teacher_id: int) -> list[AccessibleLessonSummary]:
+        owned_rows = (
             self.db.query(LessonPlan.id, LessonPlan.lesson_name)
             .filter(LessonPlan.teacher_id == teacher_id)
-            .order_by(func.lower(LessonPlan.lesson_name))
             .all()
         )
-        summaries = [(row[0], row[1]) for row in rows]
+        shared_rows = (
+            self.db.query(LessonPlan.id, LessonPlan.lesson_name, LessonShare.shared_by_teacher_id, TeacherProfile.teacher_name)
+            .join(LessonShare, LessonShare.lesson_id == LessonPlan.id)
+            .join(TeacherProfile, TeacherProfile.id == LessonShare.shared_by_teacher_id)
+            .filter(LessonShare.shared_with_teacher_id == teacher_id)
+            .all()
+        )
+
+        summaries = [
+            AccessibleLessonSummary(
+                lesson_id=row[0],
+                lesson_name=row[1],
+                display_title=row[1],
+                is_shared=False,
+            )
+            for row in owned_rows
+        ]
+        summaries.extend(
+            AccessibleLessonSummary(
+                lesson_id=row[0],
+                lesson_name=row[1],
+                display_title=f"* {row[1]}",
+                is_shared=True,
+                shared_by_teacher_id=row[2],
+                shared_by_teacher_name=row[3],
+            )
+            for row in shared_rows
+        )
+        summaries.sort(key=lambda item: item.display_title.casefold())
+
         log_event(
             logger,
-            "lesson_summaries_listed",
+            "lesson_accessible_summaries_listed",
             teacher_id=teacher_id,
             count=len(summaries),
+            shared_count=sum(1 for item in summaries if item.is_shared),
         )
         return summaries
 
@@ -211,3 +281,68 @@ class LessonRepository:
             lesson_text=lesson_text,
             lesson_payload=lesson_payload,
         )
+
+    def delete_owned_lesson(self, teacher_id: int, lesson_id: int) -> bool:
+        lesson = self.get_by_teacher_and_id(teacher_id, lesson_id)
+        if not lesson:
+            return False
+
+        self.db.delete(lesson)
+        self.db.commit()
+        log_event(
+            logger,
+            "lesson_deleted",
+            teacher_id=teacher_id,
+            lesson_id=lesson_id,
+        )
+        return True
+
+    def share_owned_lesson(
+        self,
+        *,
+        lesson_id: int,
+        owner_teacher_id: int,
+        shared_with_teacher_id: int,
+    ) -> LessonShare | None:
+        lesson = self.get_by_teacher_and_id(owner_teacher_id, lesson_id)
+        if lesson is None:
+            log_event(
+                logger,
+                "lesson_share_not_allowed",
+                lesson_id=lesson_id,
+                owner_teacher_id=owner_teacher_id,
+                shared_with_teacher_id=shared_with_teacher_id,
+            )
+            return None
+
+        share = (
+            self.db.query(LessonShare)
+            .filter(
+                LessonShare.lesson_id == lesson_id,
+                LessonShare.shared_with_teacher_id == shared_with_teacher_id,
+            )
+            .first()
+        )
+        action = "updated" if share else "created"
+
+        if share is None:
+            share = LessonShare(
+                lesson_id=lesson_id,
+                shared_by_teacher_id=owner_teacher_id,
+                shared_with_teacher_id=shared_with_teacher_id,
+            )
+            self.db.add(share)
+        else:
+            share.shared_by_teacher_id = owner_teacher_id
+
+        self.db.commit()
+        self.db.refresh(share)
+        log_event(
+            logger,
+            "lesson_shared",
+            lesson_id=lesson_id,
+            shared_by_teacher_id=owner_teacher_id,
+            shared_with_teacher_id=shared_with_teacher_id,
+            action=action,
+        )
+        return share

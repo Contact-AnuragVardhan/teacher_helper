@@ -58,6 +58,9 @@ class ConversationService:
             ConversationState.NEW_LESSON_CONFIRM_SAVE: self._handle_new_lesson_confirm_save,
             ConversationState.NEW_LESSON_NAME: self._handle_new_lesson_name,
             ConversationState.RETRIEVE_LESSON_NAME: self._handle_retrieve_lesson_name,
+            ConversationState.LESSON_ACTION_MENU: self._handle_lesson_action_menu,
+            ConversationState.SHARE_LESSON_PHONE: self._handle_share_lesson_phone,
+            ConversationState.DELETE_LESSON_CONFIRM: self._handle_delete_lesson_confirm,
         }
 
         result = handler_map[state](session, whatsapp_number, text)
@@ -230,6 +233,92 @@ class ConversationService:
         )
         return self._reply(reply_text, ConversationState.RETRIEVE_LESSON_NAME)
 
+    def _show_accessible_lessons(self, session, teacher_id: int) -> ConversationReply:
+        lesson_summaries = self.lesson_repo.list_accessible_summaries_for_teacher(teacher_id)
+        if not lesson_summaries:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply("You do not have any saved or shared lessons yet.")
+
+        session.current_state = ConversationState.RETRIEVE_LESSON_NAME.value
+        session.temp_selected_lesson_id = None
+        self.session_repo.save(session)
+
+        if len(lesson_summaries) <= 10:
+            return self._all_lessons_interactive_reply(
+                [(item.lesson_id, item.display_title) for item in lesson_summaries]
+            )
+
+        return self._all_lessons_fallback_reply([item.display_title for item in lesson_summaries])
+
+    def _lesson_action_reply(
+        self,
+        lesson_text: str,
+        *,
+        is_shared: bool,
+        shared_by_teacher_name: str | None = None,
+        prefix: str | None = None,
+    ) -> ConversationReply:
+        shared_note = ""
+        if is_shared:
+            teacher_name = (shared_by_teacher_name or "another teacher").strip()
+            shared_note = f"\n\nShared lesson from: {teacher_name}"
+
+        message_parts = []
+        if prefix:
+            message_parts.append(prefix.strip())
+        message_parts.append(f"{lesson_text}{shared_note}\n\nPlease tap one option below.")
+
+        if is_shared:
+            outbound = {
+                "type": "buttons",
+                "header": "Lesson Actions",
+                "body": "This is a shared lesson.",
+                "footer": "Tap one option below",
+                "buttons": [
+                    {"id": "lesson_action_back", "title": "Back"},
+                ],
+            }
+        else:
+            outbound = {
+                "type": "buttons",
+                "header": "Lesson Actions",
+                "body": "Choose what you want to do with this lesson.",
+                "footer": "Tap one option below",
+                "buttons": [
+                    {"id": "lesson_action_share", "title": "Share Lesson"},
+                    {"id": "lesson_action_delete", "title": "Delete"},
+                    {"id": "lesson_action_back", "title": "Back"},
+                ],
+            }
+
+        return self._reply(
+            "\n\n".join(part for part in message_parts if part),
+            ConversationState.LESSON_ACTION_MENU,
+            outbound=outbound,
+        )
+
+    def _share_lesson_phone_prompt(self, lesson_name: str) -> ConversationReply:
+        return self._reply(
+            f"Share Lesson: {lesson_name}\nPlease enter the teacher's WhatsApp number, including country code. Example: +15550001111",
+            ConversationState.SHARE_LESSON_PHONE,
+        )
+
+    def _delete_lesson_confirm_reply(self, lesson_name: str) -> ConversationReply:
+        return self._reply(
+            f"Are you sure you want to delete '{lesson_name}'?",
+            ConversationState.DELETE_LESSON_CONFIRM,
+            outbound={
+                "type": "buttons",
+                "header": "Delete Lesson",
+                "body": f"Are you sure you want to delete '{lesson_name}'?",
+                "footer": "Choose one option",
+                "buttons": [
+                    {"id": "confirm_delete_lesson", "title": "Yes, Delete"},
+                    {"id": "cancel_delete_lesson", "title": "Cancel"},
+                ],
+            },
+        )
+
     def _handle_main_menu(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         choice = normalize_choice(text)
 
@@ -258,19 +347,7 @@ class ConversationService:
                 self.session_repo.clear_temp_profile(session)
                 return self._reply(messages.NEW_LESSON_WITHOUT_PROFILE, ConversationState.PROFILE_NAME)
 
-            lesson_summaries = self.lesson_repo.list_summaries_by_teacher(teacher.id)
-            titles = [title for _, title in lesson_summaries]
-            if not titles:
-                self.session_repo.reset_for_main_menu(session)
-                return self._main_menu_reply("You do not have any saved lessons yet.")
-
-            session.current_state = ConversationState.RETRIEVE_LESSON_NAME.value
-            self.session_repo.save(session)
-
-            if len(titles) <= 10:
-                return self._all_lessons_interactive_reply(lesson_summaries)
-
-            return self._all_lessons_fallback_reply(titles)
+            return self._show_accessible_lessons(session, teacher.id)
 
         if choice in {"3", "my profile", "menu_my_profile"}:
             teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
@@ -559,37 +636,50 @@ class ConversationService:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply("Please create your profile first.")
 
-        titles = self.lesson_repo.list_titles_by_teacher(teacher.id)
-        if not titles:
+        lesson_summaries = self.lesson_repo.list_accessible_summaries_for_teacher(teacher.id)
+        if not lesson_summaries:
             self.session_repo.reset_for_main_menu(session)
-            return self._main_menu_reply("You do not have any saved lessons yet.")
+            return self._main_menu_reply("You do not have any saved or shared lessons yet.")
 
-        lesson = None
+        selected_summary = None
 
         if choice.startswith("lesson_id:"):
             raw_lesson_id = choice.split(":", 1)[1].strip()
             if raw_lesson_id.isdigit():
-                lesson = self.lesson_repo.get_by_teacher_and_id(teacher.id, int(raw_lesson_id))
+                selected_summary = next(
+                    (item for item in lesson_summaries if item.lesson_id == int(raw_lesson_id)),
+                    None,
+                )
         elif text and text.isdigit():
             lesson_index = int(text)
-            if 1 <= lesson_index <= len(titles):
-                selected_title = titles[lesson_index - 1]
-                lesson = self.lesson_repo.get_by_teacher_and_name(teacher.id, selected_title)
+            if 1 <= lesson_index <= len(lesson_summaries):
+                selected_summary = lesson_summaries[lesson_index - 1]
             else:
                 return self._reply(
                     "Invalid lesson number. Please enter a valid lesson number from the list.\nSend 0 to return to the main menu.",
                     ConversationState.RETRIEVE_LESSON_NAME,
                 )
         else:
-            exact_match = next((title for title in titles if title.casefold() == choice), None)
+            exact_match = next(
+                (
+                    item
+                    for item in lesson_summaries
+                    if item.display_title.casefold() == choice or item.lesson_name.casefold() == choice
+                ),
+                None,
+            )
             if exact_match:
-                lesson = self.lesson_repo.get_by_teacher_and_name(teacher.id, exact_match)
+                selected_summary = exact_match
             else:
-                prefix_matches = [title for title in titles if title.casefold().startswith(choice)]
+                prefix_matches = [
+                    item
+                    for item in lesson_summaries
+                    if item.display_title.casefold().startswith(choice) or item.lesson_name.casefold().startswith(choice)
+                ]
                 if len(prefix_matches) == 1:
-                    lesson = self.lesson_repo.get_by_teacher_and_name(teacher.id, prefix_matches[0])
+                    selected_summary = prefix_matches[0]
                 else:
-                    if len(titles) <= 10:
+                    if len(lesson_summaries) <= 10:
                         return self._reply(
                             "Please choose a lesson from the WhatsApp list, or send 0 to return to the main menu.",
                             ConversationState.RETRIEVE_LESSON_NAME,
@@ -599,15 +689,173 @@ class ConversationService:
                         ConversationState.RETRIEVE_LESSON_NAME,
                     )
 
-        if not lesson:
+        if not selected_summary:
             return self._reply(
                 "I could not find that lesson. Please try again.\nSend 0 to return to the main menu.",
                 ConversationState.RETRIEVE_LESSON_NAME,
             )
 
-        self.session_repo.reset_for_main_menu(session)
-        return self._reply(
-            f"{lesson.lesson_text}\n\nPlease tap one option below.",
-            ConversationState.MAIN_MENU,
-            outbound=self._main_menu_outbound(),
+        accessible_lesson = self.lesson_repo.get_accessible_lesson_by_teacher_and_id(
+            teacher.id,
+            selected_summary.lesson_id,
         )
+        if not accessible_lesson:
+            return self._reply(
+                "I could not find that lesson. Please try again.\nSend 0 to return to the main menu.",
+                ConversationState.RETRIEVE_LESSON_NAME,
+            )
+
+        session.temp_selected_lesson_id = accessible_lesson.lesson.id
+        session.current_state = ConversationState.LESSON_ACTION_MENU.value
+        self.session_repo.save(session)
+
+        return self._lesson_action_reply(
+            accessible_lesson.lesson.lesson_text,
+            is_shared=accessible_lesson.is_shared,
+            shared_by_teacher_name=accessible_lesson.shared_by_teacher_name,
+        )
+
+    def _handle_lesson_action_menu(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+        if not teacher:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply("Please create your profile first.")
+
+        lesson_id = session.temp_selected_lesson_id
+        if not lesson_id:
+            return self._show_accessible_lessons(session, teacher.id)
+
+        accessible_lesson = self.lesson_repo.get_accessible_lesson_by_teacher_and_id(teacher.id, lesson_id)
+        if not accessible_lesson:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply("That lesson is no longer available.")
+
+        choice = normalize_choice(text)
+
+        if choice in {"lesson_action_back", "3", "0", "back", "cancel", "menu", "main menu"}:
+            return self._show_accessible_lessons(session, teacher.id)
+
+        if accessible_lesson.is_shared:
+            return self._lesson_action_reply(
+                accessible_lesson.lesson.lesson_text,
+                is_shared=True,
+                shared_by_teacher_name=accessible_lesson.shared_by_teacher_name,
+                prefix="This shared lesson is view-only.",
+            )
+
+        if choice in {"lesson_action_share", "1", "share", "share lesson"}:
+            session.current_state = ConversationState.SHARE_LESSON_PHONE.value
+            self.session_repo.save(session)
+            return self._share_lesson_phone_prompt(accessible_lesson.lesson.lesson_name)
+
+        if choice in {"lesson_action_delete", "2", "delete", "delete lesson"}:
+            session.current_state = ConversationState.DELETE_LESSON_CONFIRM.value
+            self.session_repo.save(session)
+            return self._delete_lesson_confirm_reply(accessible_lesson.lesson.lesson_name)
+
+        return self._lesson_action_reply(
+            accessible_lesson.lesson.lesson_text,
+            is_shared=False,
+            prefix="Please choose one of the lesson actions below.",
+        )
+
+    def _handle_share_lesson_phone(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+        if not teacher:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply("Please create your profile first.")
+
+        lesson_id = session.temp_selected_lesson_id
+        if not lesson_id:
+            return self._show_accessible_lessons(session, teacher.id)
+
+        accessible_lesson = self.lesson_repo.get_accessible_lesson_by_teacher_and_id(teacher.id, lesson_id)
+        if not accessible_lesson:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply("That lesson is no longer available.")
+
+        if accessible_lesson.is_shared:
+            session.current_state = ConversationState.LESSON_ACTION_MENU.value
+            self.session_repo.save(session)
+            return self._lesson_action_reply(
+                accessible_lesson.lesson.lesson_text,
+                is_shared=True,
+                shared_by_teacher_name=accessible_lesson.shared_by_teacher_name,
+                prefix="Only the lesson owner can share this lesson.",
+            )
+
+        choice = normalize_choice(text)
+        if choice in {"0", "back", "cancel", "lesson_action_back"}:
+            session.current_state = ConversationState.LESSON_ACTION_MENU.value
+            self.session_repo.save(session)
+            return self._lesson_action_reply(accessible_lesson.lesson.lesson_text, is_shared=False)
+
+        recipient_number = (text or "").strip()
+        if not recipient_number:
+            return self._share_lesson_phone_prompt(accessible_lesson.lesson.lesson_name)
+
+        recipient_teacher = self.teacher_repo.get_by_whatsapp_number(recipient_number)
+        if not recipient_teacher:
+            return self._reply(
+                "I could not find a teacher profile for that WhatsApp number. Please enter a registered teacher number, or send back to return.",
+                ConversationState.SHARE_LESSON_PHONE,
+            )
+
+        if recipient_teacher.id == teacher.id:
+            return self._reply(
+                "You cannot share a lesson with yourself. Please enter another teacher's WhatsApp number, or send back to return.",
+                ConversationState.SHARE_LESSON_PHONE,
+            )
+
+        share = self.lesson_repo.share_owned_lesson(
+            lesson_id=accessible_lesson.lesson.id,
+            owner_teacher_id=teacher.id,
+            shared_with_teacher_id=recipient_teacher.id,
+        )
+        if share is None:
+            session.current_state = ConversationState.LESSON_ACTION_MENU.value
+            self.session_repo.save(session)
+            return self._lesson_action_reply(
+                accessible_lesson.lesson.lesson_text,
+                is_shared=False,
+                prefix="I could not share that lesson. Please try again.",
+            )
+
+        self.session_repo.reset_for_main_menu(session)
+        return self._main_menu_reply(
+            f"'{accessible_lesson.lesson.lesson_name}' was shared with {recipient_teacher.teacher_name}."
+        )
+
+    def _handle_delete_lesson_confirm(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+        if not teacher:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply("Please create your profile first.")
+
+        lesson_id = session.temp_selected_lesson_id
+        if not lesson_id:
+            return self._show_accessible_lessons(session, teacher.id)
+
+        lesson = self.lesson_repo.get_by_teacher_and_id(teacher.id, lesson_id)
+        if not lesson:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply("That lesson is no longer available.")
+
+        choice = normalize_choice(text)
+
+        if choice in {"cancel_delete_lesson", "2", "cancel", "no", "back", "0"}:
+            session.current_state = ConversationState.LESSON_ACTION_MENU.value
+            self.session_repo.save(session)
+            return self._lesson_action_reply(lesson.lesson_text, is_shared=False)
+
+        if choice in {"confirm_delete_lesson", "1", "yes", "yes, delete", "delete"}:
+            lesson_name = lesson.lesson_name
+            deleted = self.lesson_repo.delete_owned_lesson(teacher.id, lesson.id)
+            if not deleted:
+                self.session_repo.reset_for_main_menu(session)
+                return self._main_menu_reply("That lesson is no longer available.")
+
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply(f"'{lesson_name}' was deleted.")
+
+        return self._delete_lesson_confirm_reply(lesson.lesson_name)

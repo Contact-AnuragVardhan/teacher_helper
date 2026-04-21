@@ -427,3 +427,91 @@ def test_get_api_library_lessons_by_id_returns_404_for_missing_lesson(client):
     response = client.get("/api/library/lessons/999999")
     assert response.status_code == 404
     assert response.json()["detail"] == "Lesson not found."
+
+
+def test_delete_api_library_lesson_removes_lesson(client):
+    teacher = create_teacher(client, "+15556668881")
+    save_response = save_library_lesson(
+        client,
+        teacher["id"],
+        lesson_name="Components of Food Intro",
+        topic="Components of Food",
+    )
+    lesson_id = save_response.json()["lesson_id"]
+
+    delete_response = client.delete(
+        f"/api/library/lessons/{lesson_id}",
+        params={"teacher_id": f"teacher-{teacher['id']:03d}"},
+    )
+    assert delete_response.status_code == 200
+    assert delete_response.json()["success"] is True
+
+    get_response = client.get(f"/api/library/lessons/{lesson_id}")
+    assert get_response.status_code == 404
+
+
+def test_share_api_library_lesson_by_whatsapp_and_search_includes_shared_lessons(client):
+    owner = create_teacher(client, "+15556668882", name="Teacher One")
+    recipient = create_teacher(client, "+15556668883", name="Teacher Two")
+
+    save_response = save_library_lesson(
+        client,
+        owner["id"],
+        lesson_name="Components of Food Intro",
+        topic="Components of Food",
+    )
+    lesson_id = save_response.json()["lesson_id"]
+
+    share_response = client.post(
+        f"/api/library/lessons/{lesson_id}/share",
+        json={
+            "shared_by_teacher_id": f"teacher-{owner['id']:03d}",
+            "shared_with_whatsapp_number": "+15556668883",
+        },
+    )
+    assert share_response.status_code == 200
+    assert share_response.json()["shared_with_teacher_id"] == f"teacher-{recipient['id']:03d}"
+
+    search_response = client.get(
+        "/api/library/search",
+        params={"teacher_id": f"teacher-{recipient['id']:03d}"},
+    )
+    assert search_response.status_code == 200
+
+    body = search_response.json()
+    assert body["count"] == 1
+    assert body["items"][0]["lesson_name"] == "Components of Food Intro"
+    assert body["items"][0]["is_shared"] is True
+    assert body["items"][0]["display_name"].startswith("* ")
+    assert body["items"][0]["shared_by_teacher_name"] == "Teacher One"
+
+
+def test_search_api_library_can_exclude_shared_lessons(client):
+    owner = create_teacher(client, "+15556668884", name="Teacher One")
+    recipient = create_teacher(client, "+15556668885", name="Teacher Two")
+
+    save_response = save_library_lesson(
+        client,
+        owner["id"],
+        lesson_name="Plant Life Intro",
+        topic="Plant Life",
+    )
+    lesson_id = save_response.json()["lesson_id"]
+
+    client.post(
+        f"/api/library/lessons/{lesson_id}/share",
+        json={
+            "shared_by_teacher_id": f"teacher-{owner['id']:03d}",
+            "shared_with_teacher_id": f"teacher-{recipient['id']:03d}",
+        },
+    )
+
+    search_response = client.get(
+        "/api/library/search",
+        params={
+            "teacher_id": f"teacher-{recipient['id']:03d}",
+            "include_shared": "false",
+        },
+    )
+    assert search_response.status_code == 200
+    assert search_response.json()["count"] == 0

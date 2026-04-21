@@ -1,3 +1,4 @@
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.logging import get_logger, log_event
@@ -11,16 +12,44 @@ class TeacherRepository:
     def __init__(self, db: Session):
         self.db = db
 
+    def _digits_only(self, phone_number: str) -> str:
+        return "".join(ch for ch in (phone_number or "") if ch.isdigit())
+
+    def _canonical_whatsapp_number(self, phone_number: str) -> str:
+        digits = self._digits_only(phone_number)
+        return f"+{digits}" if digits else ""
+
     def get_by_whatsapp_number(self, whatsapp_number: str) -> TeacherProfile | None:
+        canonical_number = self._canonical_whatsapp_number(whatsapp_number)
+        digits_only = self._digits_only(whatsapp_number)
+
+        if not digits_only:
+            log_event(
+                logger,
+                "teacher_lookup",
+                whatsapp_number=whatsapp_number,
+                canonical_number=canonical_number,
+                found=False,
+            )
+            return None
+
         teacher = (
             self.db.query(TeacherProfile)
-            .filter(TeacherProfile.whatsapp_number == whatsapp_number)
+            .filter(
+                or_(
+                    TeacherProfile.whatsapp_number == canonical_number,
+                    TeacherProfile.whatsapp_number == digits_only,
+                    func.replace(TeacherProfile.whatsapp_number, "+", "") == digits_only,
+                )
+            )
             .first()
         )
+
         log_event(
             logger,
             "teacher_lookup",
             whatsapp_number=whatsapp_number,
+            canonical_number=canonical_number,
             found=teacher is not None,
         )
         return teacher
@@ -34,17 +63,20 @@ class TeacherRepository:
         default_subject: str,
         preferred_language: str,
     ) -> TeacherProfile:
-        teacher = self.get_by_whatsapp_number(whatsapp_number)
+        canonical_number = self._canonical_whatsapp_number(whatsapp_number)
+        teacher = self.get_by_whatsapp_number(canonical_number)
         action = "updated" if teacher else "created"
         normalized_subject = normalize_subject(default_subject)
+
         if teacher:
+            teacher.whatsapp_number = canonical_number or teacher.whatsapp_number
             teacher.teacher_name = teacher_name
             teacher.default_grade = default_grade
             teacher.default_subject = normalized_subject
             teacher.preferred_language = preferred_language
         else:
             teacher = TeacherProfile(
-                whatsapp_number=whatsapp_number,
+                whatsapp_number=canonical_number,
                 teacher_name=teacher_name,
                 default_grade=default_grade,
                 default_subject=normalized_subject,
@@ -57,7 +89,7 @@ class TeacherRepository:
         log_event(
             logger,
             "teacher_upsert_persisted",
-            whatsapp_number=whatsapp_number,
+            whatsapp_number=canonical_number,
             teacher_id=teacher.id,
             action=action,
         )
