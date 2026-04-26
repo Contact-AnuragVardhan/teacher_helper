@@ -24,7 +24,7 @@ PROFILE_START = "Let us set up your profile. What is your name?"
 PROFILE_NAME_PROMPT = "Please enter your name."
 PROFILE_GRADE_PROMPT = "What is your default grade/class? Example: 1, 2, 3"
 PROFILE_SUBJECT_PROMPT = "What subject do you teach? Example: English"
-PROFILE_LANGUAGE_INVALID = 'Preferred language is not supported right now. Please enter one of the configured options, for example English or Hinglish.'
+PROFILE_LANGUAGE_INVALID = "Preferred language is not supported right now. Please enter one of the configured options shown below."
 PROFILE_SAVED = "Your profile has been saved."
 
 NEW_LESSON_WITHOUT_PROFILE = (

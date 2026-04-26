@@ -11,7 +11,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite://")
 os.environ.setdefault("LLM_PROVIDER", "deterministic")
 os.environ.setdefault("DUPLICATE_LESSON_POLICY", "reject")
 os.environ.setdefault("SESSION_TIMEOUT_MINUTES", "30")
-os.environ.setdefault("SUPPORTED_LANGUAGES", "English,Hinglish")
+os.environ.setdefault("SUPPORTED_LANGUAGES", "English,Hinglish,Hindi")
 
 import pytest
 from fastapi.testclient import TestClient

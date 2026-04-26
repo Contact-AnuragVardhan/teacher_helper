@@ -185,6 +185,13 @@ class PromptBuilder:
                 "Do not use Devanagari. Keep section headings in English. "
                 "Use natural teacher-friendly Indian classroom wording with a light Hindi-English mix."
             )
+        if language == "hindi":
+            return (
+                "Write all generated lesson content in simple Hindi using Devanagari script only. "
+                "Do not write Roman Hindi or Hinglish. "
+                "Keep the structural headings and summary labels exactly in English so the app can parse the lesson, "
+                "but make the lesson title, objectives, bullets, teaching tips, and other teaching content Hindi in Devanagari."
+            )
         return "Write the lesson in clear, simple English."
 
     def _content_depth_instruction(self, subject: str) -> str:

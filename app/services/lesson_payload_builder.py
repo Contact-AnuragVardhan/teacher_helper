@@ -78,6 +78,37 @@ class LessonPayloadBuilder:
             "teaching tips": "teaching_tips",
             "teacher tip": "teaching_tips",
             "learn more": "learn_more",
+            "पाठ शीर्षक": "lesson_title",
+            "शीर्षक": "lesson_title",
+            "उद्देश्य": "objectives",
+            "लक्ष्य": "objectives",
+            "शुरुआत": "opening",
+            "1. शुरुआत": "opening",
+            "प्रारंभ": "opening",
+            "1. प्रारंभ": "opening",
+            "अवधारणा शिक्षण": "concept_teaching",
+            "2. अवधारणा शिक्षण": "concept_teaching",
+            "मुख्य शिक्षण": "concept_teaching",
+            "2. मुख्य शिक्षण": "concept_teaching",
+            "निर्देशित अभ्यास": "guided_practice",
+            "3. निर्देशित अभ्यास": "guided_practice",
+            "गतिविधि": "guided_practice",
+            "3. गतिविधि": "guided_practice",
+            "अवधारणा सुदृढ़ीकरण": "concept_reinforcement",
+            "4. अवधारणा सुदृढ़ीकरण": "concept_reinforcement",
+            "स्वतंत्र अभ्यास": "independent_practice",
+            "5. स्वतंत्र अभ्यास": "independent_practice",
+            "मूल्यांकन / जाँच": "assessment",
+            "6. मूल्यांकन / जाँच": "assessment",
+            "मूल्यांकन": "assessment",
+            "जाँच": "assessment",
+            "समापन": "closure",
+            "7. समापन": "closure",
+            "शिक्षण सुझाव": "teaching_tips",
+            "शिक्षक सुझाव": "teaching_tips",
+            "और सीखें": "learn_more",
+            "अधिक सीखें": "learn_more",
+            "स्रोत": "source",
             "source": "source",
         }
 
@@ -89,7 +120,7 @@ class LessonPayloadBuilder:
             if not line:
                 continue
 
-            if line.casefold() == "lesson planning":
+            if line.casefold() in {"lesson planning", "पाठ योजना"}:
                 continue
 
             if self._is_metadata_line(line):
@@ -174,6 +205,16 @@ class LessonPayloadBuilder:
                 "subject -",
                 "duration:",
                 "duration -",
+                "टॉपिक:",
+                "टॉपिक -",
+                "ग्रेड/कक्षा:",
+                "ग्रेड/कक्षा -",
+                "कक्षा:",
+                "कक्षा -",
+                "विषय:",
+                "विषय -",
+                "अवधि:",
+                "अवधि -",
             )
         )
 
