@@ -21,6 +21,8 @@ class DeterministicTemplateProvider(LessonGenerationProvider):
         timings = self._allocate_timings(duration)
         if preferred_language == "hinglish":
             return self._build_hinglish(topic, grade, subject, duration, timings, has_ncert_match)
+        if preferred_language == "hindi":
+            return self._build_hindi(topic, grade, subject, duration, timings, has_ncert_match)
         return self._build_english(topic, grade, subject, duration, timings, has_ncert_match)
 
     def _build_english(self, topic: str, grade: str, subject: str, duration: int, timings: dict[str, int], has_ncert_match: bool) -> str:
@@ -140,6 +142,71 @@ class DeterministicTemplateProvider(LessonGenerationProvider):
             "- Explanation short rakho aur beech-beech mein check karo.",
             "- Long theory ke bajaay board, movement, ya quick demo use karo.",
             "- Isko teaching plan samjho; details class mein orally expand karo.",
+        ]
+
+        if not has_ncert_match:
+            lines.extend(
+                [
+                    "",
+                    "Learn More",
+                    f"- https://www.youtube.com/results?search_query={self._youtube_query(topic, subject)}",
+                ]
+            )
+
+        return "\n".join(lines)
+
+    def _build_hindi(self, topic: str, grade: str, subject: str, duration: int, timings: dict[str, int], has_ncert_match: bool) -> str:
+        lines = [
+            "Lesson Planning",
+            f"Topic: {topic}",
+            f"Grade/Class: {grade}",
+            f"Subject: {subject}",
+            f"Duration: {duration} minutes",
+            "",
+            "Lesson Title",
+            f"- {topic} का सरल पाठ",
+            "",
+            "Objectives",
+            f"- {topic} की मुख्य बात समझना।",
+            f"- {topic} से जुड़े ज़रूरी बिंदु सरल शब्दों में बताना।",
+            f"- कक्षा चर्चा या अभ्यास में {topic} का उपयोग करना।",
+            "",
+            f"1. Opening ({timings['opening']} min)",
+            f"- Hook Question: {topic} के बारे में आप पहले से क्या जानते हैं?",
+            "- Teacher Move: एक छोटे उदाहरण से बच्चों का ध्यान जोड़ें।",
+            "- Quick Pair Prompt: जोड़ी में एक विचार साझा करें।",
+            "",
+            f"2. Concept Teaching ({timings['concept_teaching']} min)",
+            "- मुख्य अवधारणा को सरल हिंदी में समझाएँ।",
+            f"- {topic} से जुड़े 2 या 3 महत्वपूर्ण बिंदु बताएँ।",
+            "- एक छोटा उदाहरण या प्रदर्शन इस्तेमाल करें।",
+            "",
+            f"3. Guided Practice ({timings['guided_practice']} min)",
+            "- Activity: छोटी जोड़ी या पूरी कक्षा की गतिविधि कराएँ।",
+            "- Student Action: विद्यार्थी देखें, चर्चा करें, लिखें या उत्तर दें।",
+            "- Teacher Check: काम के दौरान छोटे प्रश्न पूछें।",
+            "",
+            f"4. Concept Reinforcement ({timings['concept_reinforcement']} min)",
+            "- सबसे महत्वपूर्ण विचार को दो छोटे बिंदुओं में दोहराएँ।",
+            "- एक सामान्य भ्रम की सही उत्तर से तुलना करें।",
+            "",
+            f"5. Independent Practice ({timings['independent_practice']} min)",
+            "- 2 या 3 छोटे लिखित या मौखिक उत्तर लें।",
+            f"- कार्य को {topic} की मुख्य सीख पर केंद्रित रखें।",
+            "",
+            f"6. Assessment / Check ({timings['assessment']} min)",
+            "- Quick Check: मुख्य विचार क्या है?",
+            "- Quick Check: एक महत्वपूर्ण शब्द या तथ्य बताइए।",
+            "- Quick Check: इस बात को अपने साथी को कैसे समझाएँगे?",
+            "",
+            f"7. Closure ({timings['closure']} min)",
+            f"- Wrap-Up: {topic} की मुख्य सीख को दोहराएँ।",
+            "- Exit Ticket: आज मैंने एक नई बात सीखी _____.",
+            "",
+            "Teaching Tips",
+            "- समझाते समय वाक्य छोटे रखें और समझ की जाँच करते रहें।",
+            "- लंबी व्याख्या के बजाय बोर्ड, गतिविधि या छोटा प्रदर्शन करें।",
+            "- इसे कक्षा योजना मानें; ज़रूरत के अनुसार मौखिक रूप से विस्तार करें।",
         ]
 
         if not has_ncert_match:

@@ -65,7 +65,7 @@ def test_profile_prompts_include_examples(client):
     assert "Example: English" in response.json()["reply"]
 
     response = send(client, "English")
-    assert "English, Hinglish" in response.json()["reply"]
+    assert "English, Hinglish, Hindi" in response.json()["reply"]
 
 
 def test_successful_lesson_generation_returns_button_outbound(client):
@@ -144,6 +144,21 @@ def test_hinglish_profile_generates_hinglish_lesson(client):
 
     assert payload["current_state"] == "NEW_LESSON_CONFIRM_SAVE"
     assert "basic idea samajhna" in payload["reply"]
+
+
+def test_hindi_profile_generates_devanagari_lesson(client, db_session):
+    create_profile_via_webhook(client, language="Hindi")
+
+    response = generate_lesson_until_save_prompt(client, topic="Plants")
+    payload = response.json()
+
+    assert payload["current_state"] == "NEW_LESSON_CONFIRM_SAVE"
+    assert "पाठ योजना" in payload["reply"]
+    assert "उद्देश्य" in payload["reply"]
+    assert "मुख्य बात समझना" in payload["reply"]
+
+    teacher = db_session.query(TeacherProfile).first()
+    assert teacher.preferred_language == "Hindi"
 
 
 

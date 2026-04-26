@@ -12,6 +12,7 @@ from app.services.llm_provider_openai import OpenAILessonGenerationProvider
 from app.services.ncert_retrieval_service import NcertRetrievalService
 from app.services.prompt_builder import PromptBuilder, PromptBuilderInput
 from app.utils.subject_normalization import normalize_subject
+from urllib.parse import unquote
 
 logger = get_logger(__name__)
 
@@ -118,6 +119,7 @@ class LessonGeneratorService:
             grade=effective_grade,
             subject=effective_subject,
             duration_minutes=duration_minutes,
+            preferred_language=teacher.preferred_language,
         )
 
         log_event(
@@ -153,6 +155,7 @@ class LessonGeneratorService:
         grade: str,
         subject: str,
         duration_minutes: int,
+        preferred_language: str,
     ) -> str:
         raw_text = (lesson_text or "").replace("\r\n", "\n").strip()
         if not raw_text:
@@ -169,6 +172,7 @@ class LessonGeneratorService:
             grade=grade,
             subject=subject,
             duration_minutes=duration_minutes,
+            preferred_language=preferred_language,
             has_ncert_match=bool(rows),
             raw_text=raw_text,
         )
@@ -195,9 +199,9 @@ class LessonGeneratorService:
             if not started:
                 if not stripped:
                     continue
-                if lowered == "lesson planning":
+                if lowered in {"lesson planning", "पाठ योजना"}:
                     started = True
-                    cleaned_lines.append("Lesson Planning")
+                    cleaned_lines.append(stripped)
                     continue
                 if lowered.startswith(preface_patterns):
                     continue
@@ -218,7 +222,7 @@ class LessonGeneratorService:
                 continue
 
             lowered = stripped.casefold()
-            if lowered == "lesson planning":
+            if lowered in {"lesson planning", "पाठ योजना"}:
                 skip_top_summary = True
                 continue
 
@@ -253,65 +257,103 @@ class LessonGeneratorService:
         grade: str,
         subject: str,
         duration_minutes: int,
+        preferred_language: str,
         has_ncert_match: bool,
         raw_text: str,
     ) -> str:
+        is_hindi = self._is_hindi_language(preferred_language)
+        labels = self._labels_for_language(preferred_language)
         planning_block = self._build_planning_block(
             topic=topic,
             grade=grade,
             subject=subject,
             duration_minutes=duration_minutes,
+            preferred_language=preferred_language,
         )
 
         timing_map = self._allocate_timings(duration_minutes)
         output: list[str] = [planning_block]
 
-        title_lines = self._prepare_content_lines(sections.get("lesson_title", []), section_key="lesson_title")
+        title_lines = self._prepare_content_lines(
+            sections.get("lesson_title", []),
+            section_key="lesson_title",
+            preferred_language=preferred_language,
+        )
         if not title_lines:
-            title_lines = [self._title_case(topic.strip())]
-        output.extend(["", "Lesson Title"])
+            title_lines = [f"{topic.strip()} का सरल पाठ" if is_hindi else self._title_case(topic.strip())]
+        output.extend(["", labels["lesson_title"]])
         output.extend(self._as_bullets(title_lines, force_bullet=True))
 
-        objective_lines = self._prepare_content_lines(sections.get("objectives", []), section_key="objectives")
+        objective_lines = self._prepare_content_lines(
+            sections.get("objectives", []),
+            section_key="objectives",
+            preferred_language=preferred_language,
+        )
         if not objective_lines:
-            objective_lines = [
-                f"Understand the main idea of {topic.strip()}",
-                f"Explain key points from {topic.strip()} in simple words",
-                f"Use the concept from {topic.strip()} in class discussion or practice",
-            ]
-        output.extend(["", "Objectives"])
+            if is_hindi:
+                objective_lines = [
+                    f"{topic.strip()} की मुख्य बात समझना",
+                    f"{topic.strip()} से जुड़े ज़रूरी बिंदु सरल शब्दों में बताना",
+                    f"कक्षा चर्चा या अभ्यास में {topic.strip()} का उपयोग करना",
+                ]
+            else:
+                objective_lines = [
+                    f"Understand the main idea of {topic.strip()}",
+                    f"Explain key points from {topic.strip()} in simple words",
+                    f"Use the concept from {topic.strip()} in class discussion or practice",
+                ]
+        output.extend(["", labels["objectives"]])
         output.extend(self._as_bullets(objective_lines, force_bullet=True))
 
         ordered_sections = [
-            ("opening", "1. Opening", timing_map["opening"]),
-            ("concept_teaching", "2. Concept Teaching", timing_map["concept_teaching"]),
-            ("guided_practice", "3. Guided Practice", timing_map["guided_practice"]),
-            ("concept_reinforcement", "4. Concept Reinforcement", timing_map["concept_reinforcement"]),
-            ("independent_practice", "5. Independent Practice", timing_map["independent_practice"]),
-            ("assessment", "6. Assessment / Check", timing_map["assessment"]),
-            ("closure", "7. Closure", timing_map["closure"]),
+            ("opening", labels["opening"], timing_map["opening"]),
+            ("concept_teaching", labels["concept_teaching"], timing_map["concept_teaching"]),
+            ("guided_practice", labels["guided_practice"], timing_map["guided_practice"]),
+            ("concept_reinforcement", labels["concept_reinforcement"], timing_map["concept_reinforcement"]),
+            ("independent_practice", labels["independent_practice"], timing_map["independent_practice"]),
+            ("assessment", labels["assessment"], timing_map["assessment"]),
+            ("closure", labels["closure"], timing_map["closure"]),
         ]
 
         for key, label, minutes in ordered_sections:
-            content_lines = self._prepare_content_lines(sections.get(key, []), section_key=key)
+            content_lines = self._prepare_content_lines(
+                sections.get(key, []),
+                section_key=key,
+                preferred_language=preferred_language,
+            )
             if not content_lines:
-                content_lines = self._fallback_section_lines(label, topic)
+                content_lines = self._fallback_section_lines(key, topic, preferred_language=preferred_language)
             heading = f"{label} ({minutes} min)"
             output.extend(["", heading])
             output.extend(self._as_bullets(content_lines, force_bullet=True))
 
-        teaching_tips = self._prepare_content_lines(sections.get("teaching_tips", []), section_key="teaching_tips")
+        teaching_tips = self._prepare_content_lines(
+            sections.get("teaching_tips", []),
+            section_key="teaching_tips",
+            preferred_language=preferred_language,
+        )
         if not teaching_tips:
-            teaching_tips = [
-                "Keep each explanation short and check understanding often",
-                "Use board work, body movement, or a quick demo instead of long theory",
-                "Treat this as a teaching plan; expand verbally in class",
-            ]
-        output.extend(["", "Teaching Tips"])
+            if is_hindi:
+                teaching_tips = [
+                    "हर व्याख्या छोटी रखें और समझ की जाँच करते रहें",
+                    "लंबी थ्योरी के बजाय बोर्ड, गतिविधि या छोटा प्रदर्शन करें",
+                    "इसे शिक्षण योजना मानें; ज़रूरत के अनुसार कक्षा में विस्तार करें",
+                ]
+            else:
+                teaching_tips = [
+                    "Keep each explanation short and check understanding often",
+                    "Use board work, body movement, or a quick demo instead of long theory",
+                    "Treat this as a teaching plan; expand verbally in class",
+                ]
+        output.extend(["", labels["teaching_tips"]])
         output.extend(self._as_bullets(teaching_tips, force_bullet=True))
 
         if not has_ncert_match:
-            learn_more_lines = self._prepare_content_lines(sections.get("learn_more", []), section_key="learn_more")
+            learn_more_lines = self._prepare_content_lines(
+                sections.get("learn_more", []),
+                section_key="learn_more",
+                preferred_language=preferred_language,
+            )
             youtube_url = self._find_youtube_url(learn_more_lines) or self._find_youtube_url([raw_text])
             if youtube_url:
                 learn_more_lines = [youtube_url]
@@ -321,7 +363,7 @@ class LessonGeneratorService:
                 learn_more_lines = [
                     f"https://www.youtube.com/results?search_query={self._youtube_query(topic, subject)}"
                 ]
-            output.extend(["", "Learn More"])
+            output.extend(["", labels["learn_more"]])
             output.extend(self._as_bullets(learn_more_lines[:1], force_bullet=True))
 
         return "\n".join(output).strip()
@@ -360,6 +402,37 @@ class LessonGeneratorService:
             "teacher tip": "teaching_tips",
             "teacher tips": "teaching_tips",
             "learn more": "learn_more",
+            "पाठ शीर्षक": "lesson_title",
+            "शीर्षक": "lesson_title",
+            "उद्देश्य": "objectives",
+            "लक्ष्य": "objectives",
+            "शुरुआत": "opening",
+            "1. शुरुआत": "opening",
+            "प्रारंभ": "opening",
+            "1. प्रारंभ": "opening",
+            "अवधारणा शिक्षण": "concept_teaching",
+            "2. अवधारणा शिक्षण": "concept_teaching",
+            "मुख्य शिक्षण": "concept_teaching",
+            "2. मुख्य शिक्षण": "concept_teaching",
+            "निर्देशित अभ्यास": "guided_practice",
+            "3. निर्देशित अभ्यास": "guided_practice",
+            "गतिविधि": "guided_practice",
+            "3. गतिविधि": "guided_practice",
+            "अवधारणा सुदृढ़ीकरण": "concept_reinforcement",
+            "4. अवधारणा सुदृढ़ीकरण": "concept_reinforcement",
+            "स्वतंत्र अभ्यास": "independent_practice",
+            "5. स्वतंत्र अभ्यास": "independent_practice",
+            "मूल्यांकन / जाँच": "assessment",
+            "6. मूल्यांकन / जाँच": "assessment",
+            "मूल्यांकन": "assessment",
+            "जाँच": "assessment",
+            "समापन": "closure",
+            "7. समापन": "closure",
+            "शिक्षण सुझाव": "teaching_tips",
+            "शिक्षक सुझाव": "teaching_tips",
+            "और सीखें": "learn_more",
+            "अधिक सीखें": "learn_more",
+            "स्रोत": "source",
             "source": "source",
         }
 
@@ -394,6 +467,36 @@ class LessonGeneratorService:
             ("teacher tips", "teaching_tips"),
             ("teacher tip", "teaching_tips"),
             ("learn more", "learn_more"),
+            ("पाठ शीर्षक", "lesson_title"),
+            ("शीर्षक", "lesson_title"),
+            ("उद्देश्य", "objectives"),
+            ("लक्ष्य", "objectives"),
+            ("1. शुरुआत", "opening"),
+            ("शुरुआत", "opening"),
+            ("1. प्रारंभ", "opening"),
+            ("प्रारंभ", "opening"),
+            ("2. अवधारणा शिक्षण", "concept_teaching"),
+            ("अवधारणा शिक्षण", "concept_teaching"),
+            ("2. मुख्य शिक्षण", "concept_teaching"),
+            ("मुख्य शिक्षण", "concept_teaching"),
+            ("3. निर्देशित अभ्यास", "guided_practice"),
+            ("निर्देशित अभ्यास", "guided_practice"),
+            ("गतिविधि", "guided_practice"),
+            ("4. अवधारणा सुदृढ़ीकरण", "concept_reinforcement"),
+            ("अवधारणा सुदृढ़ीकरण", "concept_reinforcement"),
+            ("5. स्वतंत्र अभ्यास", "independent_practice"),
+            ("स्वतंत्र अभ्यास", "independent_practice"),
+            ("6. मूल्यांकन / जाँच", "assessment"),
+            ("मूल्यांकन / जाँच", "assessment"),
+            ("मूल्यांकन", "assessment"),
+            ("जाँच", "assessment"),
+            ("7. समापन", "closure"),
+            ("समापन", "closure"),
+            ("शिक्षण सुझाव", "teaching_tips"),
+            ("शिक्षक सुझाव", "teaching_tips"),
+            ("और सीखें", "learn_more"),
+            ("अधिक सीखें", "learn_more"),
+            ("स्रोत", "source"),
             ("source", "source"),
         ]
         for candidate in (key, key_without_parens):
@@ -402,18 +505,34 @@ class LessonGeneratorService:
                     return mapped
         return None
 
-    def _prepare_content_lines(self, lines: list[str], *, section_key: str) -> list[str]:
+    def _prepare_content_lines(self, lines: list[str], *, section_key: str, preferred_language: str = "English") -> list[str]:
         compacted = self._compact_label_value_lines(lines)
         cleaned: list[str] = []
         for line in compacted:
             value = self._strip_list_marker(self._strip_leading_emoji(self._normalize_inline_markdown(line))).strip()
             if not value:
                 continue
-            if value.casefold().startswith(("topic:", "grade/class:", "subject:", "duration:")):
+            if value.casefold().startswith(
+                (
+                    "topic:",
+                    "grade/class:",
+                    "subject:",
+                    "duration:",
+                    "टॉपिक:",
+                    "ग्रेड/कक्षा:",
+                    "कक्षा:",
+                    "विषय:",
+                    "अवधि:",
+                )
+            ):
                 continue
             if self._is_timing_line(value):
                 continue
-            value = self._normalize_house_style_line(value, section_key=section_key)
+            value = self._normalize_house_style_line(
+                value,
+                section_key=section_key,
+                preferred_language=preferred_language,
+            )
             if not value:
                 continue
             cleaned.append(value)
@@ -444,7 +563,7 @@ class LessonGeneratorService:
             i += 1
         return output
 
-    def _normalize_house_style_line(self, text: str, *, section_key: str) -> str:
+    def _normalize_house_style_line(self, text: str, *, section_key: str, preferred_language: str = "English") -> str:
         value = re.sub(r"\s+", " ", text).strip()
         value = re.sub(r"^[\"'“”‘’]+|[\"'“”‘’]+$", "", value).strip()
         value = re.sub(r"\s*[–—]\s*", " - ", value)
@@ -461,19 +580,25 @@ class LessonGeneratorService:
             return ""
 
         if section_key == "lesson_title":
-            return self._title_case(value)
+            return value if self._is_hindi_language(preferred_language) else self._title_case(value)
 
         if re.match(r"^[A-Za-z][A-Za-z /&-]{1,40}:\s", value):
             label, rest = value.split(":", 1)
             rest = self._trim_plan_length(rest.strip(), section_key=section_key)
             if not rest:
                 return ""
-            return f"{self._title_case(label.strip())}: {self._sentence_case(rest)}"
+            return self._localize_hindi_bullet_label(
+                f"{self._title_case(label.strip())}: {self._sentence_case(rest)}",
+                preferred_language,
+            )
 
         trimmed = self._trim_plan_length(value, section_key=section_key)
         if section_key in {"objectives", "teaching_tips"}:
-            return self._sentence_case(trimmed, keep_short=True)
-        return self._sentence_case(trimmed)
+            return self._localize_hindi_bullet_label(
+                self._sentence_case(trimmed, keep_short=True),
+                preferred_language,
+            )
+        return self._localize_hindi_bullet_label(self._sentence_case(trimmed), preferred_language)
 
     def _split_overstuffed_line(self, value: str, *, section_key: str) -> str:
         if section_key in {"learn_more", "lesson_title"}:
@@ -556,44 +681,97 @@ class LessonGeneratorService:
     def _as_plain_lines(self, lines: list[str]) -> list[str]:
         return [self._strip_list_marker(line).strip() for line in lines if line.strip()]
 
-    def _fallback_section_lines(self, label: str, topic: str) -> list[str]:
+    def _fallback_section_lines(self, section_key: str, topic: str, *, preferred_language: str = "English") -> list[str]:
+        if self._is_hindi_language(preferred_language):
+            fallback_map = {
+                "opening": [
+                    f"प्रश्न: {topic.strip()} के बारे में आप पहले से क्या जानते हैं?",
+                    "शिक्षक गतिविधि: एक छोटे उदाहरण से बच्चों का ध्यान जोड़ें",
+                    "जोड़ी चर्चा: विद्यार्थी एक विचार साझा करें",
+                ],
+                "concept_teaching": [
+                    f"{topic.strip()} की मुख्य अवधारणा को सरल भाषा में समझाएँ",
+                    "2 से 3 ज़रूरी बिंदु बच्चों को याद कराएँ",
+                    "एक छोटा कक्षा उदाहरण या प्रदर्शन करें",
+                ],
+                "guided_practice": [
+                    "गतिविधि: छोटी जोड़ी या पूरी कक्षा का कार्य कराएँ",
+                    "विद्यार्थी कार्य: देखें, चर्चा करें, छाँटें, हल करें या उत्तर दें",
+                    "शिक्षक जाँच: कार्य के दौरान छोटे प्रश्न पूछें",
+                ],
+                "concept_reinforcement": [
+                    "मुख्य विचार को छोटे बिंदुओं में दोहराएँ",
+                    "एक सही विचार की सामान्य भ्रम से तुलना करें",
+                ],
+                "independent_practice": [
+                    "2 से 3 छोटे लिखित या मौखिक उत्तर लें",
+                    "कार्य को मुख्य सीख पर केंद्रित रखें",
+                ],
+                "assessment": [
+                    "त्वरित जाँच: मुख्य विचार क्या है?",
+                    "त्वरित जाँच: एक ज़रूरी शब्द या तथ्य क्या है?",
+                    "त्वरित जाँच: इसे साथी को कैसे समझाएँगे?",
+                ],
+                "closure": [
+                    f"समापन: {topic.strip()} की मुख्य सीख दोहराएँ",
+                    "एग्ज़िट टिकट: आज मैंने एक नई बात सीखी _____",
+                ],
+            }
+            return fallback_map.get(section_key, [])
+
         fallback_map = {
-            "1. Opening": [
+            "opening": [
                 f"Hook Question: What do you already know about {topic.strip()}?",
                 "Teacher Move: Start with one quick example or observation",
                 "Quick Pair Prompt: Let students share one first idea",
             ],
-            "2. Concept Teaching": [
+            "concept_teaching": [
                 f"Teach the main concept behind {topic.strip()} in simple language",
                 "Highlight 2 to 3 key points students must remember",
                 "Use one short classroom example or demo",
             ],
-            "3. Guided Practice": [
+            "guided_practice": [
                 "Activity: Run one short pair or whole-class task",
                 "Student Action: Observe, discuss, sort, solve, or respond",
                 "Teacher Check: Ask short questions during the task",
             ],
-            "4. Concept Reinforcement": [
+            "concept_reinforcement": [
                 "Repeat the key idea in short bullets",
                 "Compare one correct idea with one common confusion",
             ],
-            "5. Independent Practice": [
+            "independent_practice": [
                 "Ask for 2 to 3 short written or oral responses",
                 "Keep the task focused on the main learning",
             ],
-            "6. Assessment / Check": [
+            "assessment": [
                 "Quick Check: What is the main idea?",
                 "Quick Check: What is one important fact or term?",
                 "Quick Check: How would you explain it to a classmate?",
             ],
-            "7. Closure": [
+            "closure": [
                 f"Wrap-Up: Summarize the key takeaway from {topic.strip()}",
                 "Exit Ticket: One new thing I learned today is _____",
             ],
         }
-        return fallback_map.get(label, [])
+        return fallback_map.get(section_key, [])
 
-    def _build_planning_block(self, *, topic: str, grade: str, subject: str, duration_minutes: int) -> str:
+    def _build_planning_block(
+        self,
+        *,
+        topic: str,
+        grade: str,
+        subject: str,
+        duration_minutes: int,
+        preferred_language: str = "English",
+    ) -> str:
+        if self._is_hindi_language(preferred_language):
+            return (
+                "पाठ योजना\n"
+                f"टॉपिक: {topic.strip()}\n"
+                f"ग्रेड/कक्षा: {grade.strip()}\n"
+                f"विषय: {subject.strip()}\n"
+                f"अवधि: {int(duration_minutes)} minutes"
+            )
         return (
             "Lesson Planning\n"
             f"Topic: {topic.strip()}\n"
@@ -601,6 +779,61 @@ class LessonGeneratorService:
             f"Subject: {subject.strip()}\n"
             f"Duration: {int(duration_minutes)} minutes"
         )
+
+    def _is_hindi_language(self, preferred_language: str) -> bool:
+        return preferred_language.strip().casefold() == "hindi"
+
+    def _labels_for_language(self, preferred_language: str) -> dict[str, str]:
+        if self._is_hindi_language(preferred_language):
+            return {
+                "lesson_title": "पाठ शीर्षक",
+                "objectives": "उद्देश्य",
+                "opening": "1. शुरुआत",
+                "concept_teaching": "2. अवधारणा शिक्षण",
+                "guided_practice": "3. निर्देशित अभ्यास",
+                "concept_reinforcement": "4. अवधारणा सुदृढ़ीकरण",
+                "independent_practice": "5. स्वतंत्र अभ्यास",
+                "assessment": "6. मूल्यांकन / जाँच",
+                "closure": "7. समापन",
+                "teaching_tips": "शिक्षण सुझाव",
+                "learn_more": "और सीखें",
+            }
+        return {
+            "lesson_title": "Lesson Title",
+            "objectives": "Objectives",
+            "opening": "1. Opening",
+            "concept_teaching": "2. Concept Teaching",
+            "guided_practice": "3. Guided Practice",
+            "concept_reinforcement": "4. Concept Reinforcement",
+            "independent_practice": "5. Independent Practice",
+            "assessment": "6. Assessment / Check",
+            "closure": "7. Closure",
+            "teaching_tips": "Teaching Tips",
+            "learn_more": "Learn More",
+        }
+
+    def _localize_hindi_bullet_label(self, value: str, preferred_language: str) -> str:
+        if not self._is_hindi_language(preferred_language):
+            return value
+
+        label_map = {
+            "Hook Question": "प्रश्न",
+            "Teacher Move": "शिक्षक गतिविधि",
+            "Quick Pair Prompt": "जोड़ी चर्चा",
+            "Activity": "गतिविधि",
+            "Student Action": "विद्यार्थी कार्य",
+            "Teacher Check": "शिक्षक जाँच",
+            "Quick Check": "त्वरित जाँच",
+            "Wrap-Up": "समापन",
+            "Exit Ticket": "एग्ज़िट टिकट",
+        }
+        for english_label, hindi_label in label_map.items():
+            value = re.sub(
+                rf"(?i)^{re.escape(english_label)}\s*:",
+                f"{hindi_label}:",
+                value,
+            )
+        return value
 
     def _build_source_block(self, rows: list[dict]) -> str:
         if not rows:
@@ -638,7 +871,28 @@ class LessonGeneratorService:
 
     def _is_top_summary_line(self, text: str) -> bool:
         lowered = text.strip().casefold()
-        return lowered.startswith(("topic -", "topic:", "grade/class -", "grade/class:", "subject -", "subject:", "duration -", "duration:"))
+        return lowered.startswith(
+            (
+                "topic -",
+                "topic:",
+                "grade/class -",
+                "grade/class:",
+                "subject -",
+                "subject:",
+                "duration -",
+                "duration:",
+                "टॉपिक -",
+                "टॉपिक:",
+                "विषय -",
+                "विषय:",
+                "ग्रेड/कक्षा -",
+                "ग्रेड/कक्षा:",
+                "कक्षा -",
+                "कक्षा:",
+                "अवधि -",
+                "अवधि:",
+            )
+        )
 
     def _normalize_inline_markdown(self, text: str) -> str:
         value = text.strip()
@@ -663,10 +917,19 @@ class LessonGeneratorService:
 
     def _find_youtube_url(self, lines: list[str]) -> str | None:
         for line in lines:
-            match = re.search(r"https?://(?:www\.)?(?:youtube\.com|youtu\.be)/\S+", line, flags=re.IGNORECASE)
+            match = re.search(
+                r"https?://(?:www\.)?(?:youtube\.com|youtu\.be)/\S+",
+                line,
+                flags=re.IGNORECASE,
+            )
             if match:
-                return match.group(0)
+                return self._make_url_display_friendly(match.group(0))
         return None
+
+    def _make_url_display_friendly(self, url: str) -> str:
+        if "youtube.com/results?search_query=" in url:
+            return unquote(url)
+        return url
 
     def _youtube_query(self, topic: str, subject: str) -> str:
         query = f"{topic} {subject} lesson for students"

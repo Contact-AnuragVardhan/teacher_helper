@@ -59,6 +59,9 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
                 f"7. Closure -> ({timing_map.get('closure', 'required')} min)"
             )
             has_ncert_match = bool(prompt.metadata.get("has_ncert_match"))
+            language_instruction = self._revision_language_instruction(
+                str(prompt.metadata.get("preferred_language", "English"))
+            )
             revised = self._create_completion(
                 messages=[
                     {"role": "system", "content": prompt.system_prompt},
@@ -89,6 +92,7 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
                             "Objectives must be short bullet points. "
                             "Teaching Tips must be short bullet points. "
                             "No markdown tables. No long paragraphs. "
+                            f"{language_instruction} "
                             + (
                                 "Do not include Learn More or any YouTube link because NCERT was matched."
                                 if has_ncert_match
@@ -108,6 +112,21 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
 
         log_event(logger, "openai_request_completed", model=self.model)
         return content.strip()
+
+    def _revision_language_instruction(self, preferred_language: str) -> str:
+        language = preferred_language.strip().casefold()
+        if language == "hindi":
+            return (
+                "Keep structural headings and metadata labels in English, but write the lesson title, "
+                "objectives, bullets, teaching tips, and teaching content in Hindi using Devanagari script only. "
+                "Do not use Roman Hindi or Hinglish."
+            )
+        if language == "hinglish":
+            return (
+                "Keep section headings in English and write the lesson body in simple Hinglish using Roman script only. "
+                "Do not use Devanagari."
+            )
+        return "Write the lesson in clear, simple English."
 
     def _create_completion(self, *, messages: list[dict[str, str]], temperature: float) -> str:
         response = self.client.chat.completions.create(
@@ -141,14 +160,23 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
         return True
 
     def _has_top_summary_block(self, text: str) -> bool:
-        summary_checks = [
+        english_summary_checks = [
             r"(?im)^\s*Lesson Planning\s*:?[ \t]*$",
             r"(?im)^\s*Topic\s*[-:]\s*.+$",
             r"(?im)^\s*Grade/Class\s*[-:]\s*.+$",
             r"(?im)^\s*Subject\s*[-:]\s*.+$",
             r"(?im)^\s*Duration\s*[-:]\s*.+$",
         ]
-        return all(re.search(pattern, text) for pattern in summary_checks)
+        hindi_summary_checks = [
+            r"(?im)^\s*पाठ योजना\s*:?[ \t]*$",
+            r"(?im)^\s*(?:टॉपिक|विषय)\s*[-:]\s*.+$",
+            r"(?im)^\s*(?:ग्रेड/कक्षा|कक्षा)\s*[-:]\s*.+$",
+            r"(?im)^\s*(?:विषय|Subject)\s*[-:]\s*.+$",
+            r"(?im)^\s*(?:अवधि|Duration)\s*[-:]\s*.+$",
+        ]
+        return all(re.search(pattern, text) for pattern in english_summary_checks) or all(
+            re.search(pattern, text) for pattern in hindi_summary_checks
+        )
 
     def _has_required_sections(self, text: str) -> bool:
         new_sections = [
@@ -172,10 +200,24 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
             r"Q\s*&\s*A",
             r"Closing",
         ]
+        hindi_sections = [
+            r"पाठ शीर्षक",
+            r"उद्देश्य",
+            r"1\.\s*(?:शुरुआत|प्रारंभ)",
+            r"2\.\s*(?:अवधारणा शिक्षण|मुख्य शिक्षण)",
+            r"3\.\s*निर्देशित अभ्यास",
+            r"4\.\s*अवधारणा सुदृढ़ीकरण",
+            r"5\.\s*स्वतंत्र अभ्यास",
+            r"6\.\s*(?:मूल्यांकन\s*/\s*जाँच|मूल्यांकन|जाँच)",
+            r"7\.\s*समापन",
+            r"शिक्षण सुझाव",
+        ]
 
         if self._has_section_set(text, new_sections):
             return True
-        return self._has_section_set(text, legacy_sections)
+        if self._has_section_set(text, legacy_sections):
+            return True
+        return self._has_section_set(text, hindi_sections)
 
     def _has_section_set(self, text: str, sections: list[str]) -> bool:
         for section in sections:
@@ -187,7 +229,7 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
     def _has_required_timings(self, text: str) -> bool:
         timing_line_count = len(
             re.findall(
-                r"(?im)^\s*(?:[1-7]\.)?\s*[A-Za-z/& ]+\(\s*\d+(?:\s*[–-]\s*\d+)?\s*min\s*\)\s*:?[ \t]*$",
+                r"(?im)^\s*(?:[1-7]\.)?\s*[^\n()]+\(\s*\d+(?:\s*[–-]\s*\d+)?\s*min\s*\)\s*:?[ \t]*$",
                 text,
             )
         )
@@ -206,7 +248,7 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
 
     def _has_learn_more_requirement(self, text: str, prompt: PromptBundle) -> bool:
         has_ncert_match = bool(prompt.metadata.get("has_ncert_match"))
-        has_learn_more = bool(re.search(r"(?im)^\s*Learn More\s*:?[ \t]*$", text))
+        has_learn_more = bool(re.search(r"(?im)^\s*(?:Learn More|और सीखें|अधिक सीखें)\s*:?[ \t]*$", text))
         has_youtube = "youtube.com" in text.casefold() or "youtu.be" in text.casefold()
 
         if has_ncert_match:
