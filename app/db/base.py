@@ -5,4 +5,4 @@ class Base(DeclarativeBase):
     pass
 
 
-import app.models  # noqa: E402,F401
+import app.models  

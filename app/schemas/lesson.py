@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -52,6 +53,7 @@ class LessonResponse(BaseModel):
     subject: str
     duration_minutes: int
     lesson_text: str
+    lesson_payload: dict[str, Any] | None = None
     created_at: datetime
     updated_at: datetime
 

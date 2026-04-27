@@ -17,7 +17,20 @@ class TeacherProfile(Base):
     preferred_language: Mapped[str] = mapped_column(String(50), nullable=False, default="English")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
     )
 
     lessons = relationship("LessonPlan", back_populates="teacher", cascade="all, delete-orphan")
+    sent_lesson_shares = relationship(
+        "LessonShare",
+        foreign_keys="LessonShare.shared_by_teacher_id",
+        back_populates="shared_by_teacher",
+    )
+    received_lesson_shares = relationship(
+        "LessonShare",
+        foreign_keys="LessonShare.shared_with_teacher_id",
+        back_populates="shared_with_teacher",
+    )

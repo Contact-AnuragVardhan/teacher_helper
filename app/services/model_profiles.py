@@ -51,7 +51,7 @@ EXACT_MODEL_PROFILES: dict[str, ModelProfile] = {
         max_output_tokens=900,
     ),
 
-    # future-ready placeholders
+    
     "gemini-2.5-flash": ModelProfile(
         provider="google",
         api_mode="generate_content",

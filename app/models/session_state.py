@@ -16,9 +16,13 @@ class SessionState(Base):
     temp_duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     temp_generated_lesson: Mapped[str | None] = mapped_column(Text, nullable=True)
     temp_lesson_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    temp_selected_lesson_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     temp_profile_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     temp_profile_grade: Mapped[str | None] = mapped_column(String(100), nullable=True)
     temp_profile_subject: Mapped[str | None] = mapped_column(String(100), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+        DateTime,
+        default=datetime.utcnow,
+        onupdate=datetime.utcnow,
+        nullable=False,
     )
