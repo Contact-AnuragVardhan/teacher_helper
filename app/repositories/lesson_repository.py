@@ -20,6 +20,7 @@ class AccessibleLessonSummary:
     lesson_name: str
     display_title: str
     is_shared: bool
+    topic: str | None = None
     shared_by_teacher_id: int | None = None
     shared_by_teacher_name: str | None = None
 
@@ -110,12 +111,18 @@ class LessonRepository:
 
     def list_accessible_summaries_for_teacher(self, teacher_id: int) -> list[AccessibleLessonSummary]:
         owned_rows = (
-            self.db.query(LessonPlan.id, LessonPlan.lesson_name)
+            self.db.query(LessonPlan.id, LessonPlan.lesson_name, LessonPlan.topic)
             .filter(LessonPlan.teacher_id == teacher_id)
             .all()
         )
         shared_rows = (
-            self.db.query(LessonPlan.id, LessonPlan.lesson_name, LessonShare.shared_by_teacher_id, TeacherProfile.teacher_name)
+            self.db.query(
+                LessonPlan.id,
+                LessonPlan.lesson_name,
+                LessonPlan.topic,
+                LessonShare.shared_by_teacher_id,
+                TeacherProfile.teacher_name,
+            )
             .join(LessonShare, LessonShare.lesson_id == LessonPlan.id)
             .join(TeacherProfile, TeacherProfile.id == LessonShare.shared_by_teacher_id)
             .filter(LessonShare.shared_with_teacher_id == teacher_id)
@@ -128,6 +135,7 @@ class LessonRepository:
                 lesson_name=row[1],
                 display_title=row[1],
                 is_shared=False,
+                topic=row[2],
             )
             for row in owned_rows
         ]
@@ -137,8 +145,9 @@ class LessonRepository:
                 lesson_name=row[1],
                 display_title=f"* {row[1]}",
                 is_shared=True,
-                shared_by_teacher_id=row[2],
-                shared_by_teacher_name=row[3],
+                topic=row[2],
+                shared_by_teacher_id=row[3],
+                shared_by_teacher_name=row[4],
             )
             for row in shared_rows
         )

@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 import re
 
@@ -7,13 +7,14 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.language import DEFAULT_LANGUAGE, language_key, normalize_language
 from app.core.logging import get_logger, log_event
-from app.repositories.lesson_repository import LessonRepository
+from app.repositories.lesson_repository import AccessibleLessonSummary, LessonRepository
 from app.repositories.session_repository import SessionRepository
 from app.repositories.teacher_repository import TeacherRepository
 from app.services.lesson_generator import LessonGeneratorService
 from app.services.lesson_payload_builder import LessonPayloadBuilder
 from app.services.subject_resolver import SubjectResolver
 from app.state_machine.states import ConversationState
+from app.utils.lesson_title_localization import localize_lesson_display_title
 from app.utils.profile_validation import validate_profile_grade, validate_profile_subject
 from app.utils.text import clean_text, normalize_choice, normalize_grade, parse_duration_minutes
 
@@ -387,6 +388,24 @@ class ConversationService:
     def _format_numbered_titles(self, titles: list[str]) -> str:
         return "\n".join(f"{index}. {title}" for index, title in enumerate(titles, start=1))
 
+    def _localize_lesson_summaries(
+        self,
+        lesson_summaries: list[AccessibleLessonSummary],
+        language: str,
+    ) -> list[AccessibleLessonSummary]:
+        localized: list[AccessibleLessonSummary] = []
+        for item in lesson_summaries:
+            display_title = localize_lesson_display_title(
+                lesson_name=item.lesson_name,
+                topic=item.topic,
+                target_language=language,
+            )
+            if item.is_shared and not display_title.startswith("*"):
+                display_title = f"* {display_title}"
+            localized.append(replace(item, display_title=display_title))
+        localized.sort(key=lambda item: item.display_title.casefold())
+        return localized
+
     def _is_greeting(self, choice: str) -> bool:
         return choice in {
             "hi",
@@ -644,7 +663,10 @@ class ConversationService:
         return self._reply(reply_text, ConversationState.RETRIEVE_LESSON_NAME)
 
     def _show_accessible_lessons(self, session, teacher_id: int, language: str) -> ConversationReply:
-        lesson_summaries = self.lesson_repo.list_accessible_summaries_for_teacher(teacher_id)
+        lesson_summaries = self._localize_lesson_summaries(
+            self.lesson_repo.list_accessible_summaries_for_teacher(teacher_id),
+            language,
+        )
         if not lesson_summaries:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "all_lessons_empty"), language)
@@ -1101,7 +1123,10 @@ class ConversationService:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "create_profile_first"), language)
 
-        lesson_summaries = self.lesson_repo.list_accessible_summaries_for_teacher(teacher.id)
+        lesson_summaries = self._localize_lesson_summaries(
+            self.lesson_repo.list_accessible_summaries_for_teacher(teacher.id),
+            language,
+        )
         if not lesson_summaries:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "all_lessons_empty"), language)
