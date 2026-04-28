@@ -2,13 +2,15 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from app.core.language import DEFAULT_LANGUAGE
+
 
 class TeacherUpsertRequest(BaseModel):
     whatsapp_number: str
     teacher_name: str
     default_grade: str
     default_subject: str
-    preferred_language: str
+    preferred_language: str = DEFAULT_LANGUAGE
 
 
 class TeacherResponse(BaseModel):

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.core.config import get_settings
 from app.core.logging import get_logger, log_event
 from app.db.session import get_db
 from app.repositories.lesson_repository import LessonRepository
@@ -13,7 +14,8 @@ from app.schemas.lesson import (
 )
 from app.services.lesson_generator import LessonGeneratorService
 from app.services.lesson_payload_builder import LessonPayloadBuilder
-from app.utils.subject_normalization import normalize_subject
+from app.services.subject_resolver import SubjectResolver
+from app.utils.text import normalize_grade
 
 router = APIRouter(prefix="/lesson", tags=["lesson"])
 logger = get_logger(__name__)
@@ -50,8 +52,8 @@ def generate_lesson(payload: LessonGenerateRequest, db: Session = Depends(get_db
         teacher=teacher,
         topic=payload.topic.strip(),
         duration_minutes=payload.duration_minutes,
-        grade=payload.grade,
-        subject=normalize_subject(payload.subject) if payload.subject else None,
+        grade=normalize_grade(payload.grade) if payload.grade else None,
+        subject=SubjectResolver(get_settings()).resolve(payload.subject, language=teacher.preferred_language) if payload.subject else None,
     )
     log_event(
         logger,

@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+from app.utils.text import parse_duration_minutes
 
 
 class LessonGenerateRequest(BaseModel):
@@ -10,6 +12,14 @@ class LessonGenerateRequest(BaseModel):
     duration_minutes: int
     grade: str | None = None
     subject: str | None = None
+
+    @field_validator("duration_minutes", mode="before")
+    @classmethod
+    def parse_duration(cls, value):
+        minutes = parse_duration_minutes(value)
+        if minutes is None:
+            raise ValueError("duration_minutes must be greater than 0.")
+        return minutes
 
 
 class SyllabusMatchResponse(BaseModel):
@@ -43,6 +53,14 @@ class LessonSaveRequest(BaseModel):
     topic: str
     duration_minutes: int
     lesson_text: str
+
+    @field_validator("duration_minutes", mode="before")
+    @classmethod
+    def parse_duration(cls, value):
+        minutes = parse_duration_minutes(value)
+        if minutes is None:
+            raise ValueError("duration_minutes must be greater than 0.")
+        return minutes
 
 
 class LessonResponse(BaseModel):

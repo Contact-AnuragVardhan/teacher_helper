@@ -1,7 +1,10 @@
 from dataclasses import dataclass, field
 
+from app.core.config import get_settings
+from app.core.language import DEFAULT_LANGUAGE, language_key, normalize_language
 from app.core.logging import get_logger, log_event
 from app.services.lesson_generation_provider import PromptBundle
+from app.utils.subject_normalization import subject_display_name
 
 logger = get_logger(__name__)
 
@@ -19,25 +22,11 @@ class PromptBuilderInput:
 
 class PromptBuilder:
     def build(self, data: PromptBuilderInput) -> PromptBundle:
-        has_ncert_match = bool(data.retrieved_snippets)
-        context_block = "\n\n---\n\n".join(data.retrieved_snippets[:3]).strip()
-        if not context_block:
-            context_block = (
-                "No NCERT syllabus row matched this topic for the requested grade and subject. "
-                "Create the lesson plan for the requested topic itself using general classroom knowledge. "
-                "Do not switch to another NCERT chapter or textbook topic."
-            )
-
-        log_event(
-            logger,
-            "prompt_builder_ncert_context_block",
-            grade=data.grade,
-            subject=data.subject,
-            topic=data.topic,
-            has_ncert_match=has_ncert_match,
-            context_block=context_block,
-        )
-
+        # Important: NCERT snippets/rows are intentionally NOT included in the prompt.
+        # The client requirement is that the LLM should use its own NCERT knowledge if possible,
+        # instead of receiving our stored NCERT chunks as context.
+        settings = get_settings()
+        preferred_language = normalize_language(data.preferred_language, default=None) or settings.default_language
         timing_map = self._allocate_timings(data.duration_minutes)
         timing_block = (
             f"1. Opening -> ({timing_map['opening']} min)\n"
@@ -49,8 +38,15 @@ class PromptBuilder:
             f"7. Closure -> ({timing_map['closure']} min)"
         )
 
-        language_instruction = self._language_instruction(data.preferred_language)
+        language_instruction = self._language_instruction(preferred_language)
         content_depth_instruction = self._content_depth_instruction(data.subject)
+        response_shape = self._response_shape(
+            preferred_language=preferred_language,
+            topic=data.topic,
+            grade=data.grade,
+            subject=data.subject,
+            duration_minutes=data.duration_minutes,
+        )
 
         system_prompt = (
             "You are a lesson planning assistant for Indian K-12 teachers. "
@@ -61,47 +57,37 @@ class PromptBuilder:
             "Keep strong boundaries between sections using blank lines. "
             "Do not write any preface such as 'Here is your generated lesson plan'. "
             "Do not use markdown tables. Do not write long paragraphs. Do not add commentary outside the lesson plan. "
-            "Use these visible sections in this order: Lesson Title, Objectives, 1. Opening, 2. Concept Teaching, 3. Guided Practice, "
-            "4. Concept Reinforcement, 5. Independent Practice, 6. Assessment / Check, 7. Closure, Teaching Tips. "
-            "Use Learn More only when no NCERT match exists. "
-            "Never add a Source section yourself because the app will add it when NCERT data exists. "
+            "Use the required section order exactly. "
+            "Do not claim that NCERT context was provided to you. It was not provided. "
+            "If you can reliably identify the relevant NCERT book/unit/chapter from your own knowledge, include a Source block as the final block at the bottom of your response. "
+            "The app will not append a Source block separately; the Source block must come from your response. "
+            "If you cannot reliably identify an NCERT source, do not invent one; include one Learn More YouTube search link as the final block instead. "
+            "Never include both Source and Learn More in the same response. "
             f"{language_instruction}"
         )
-
-        if has_ncert_match:
-            match_instruction = (
-                "- Build the lesson around the matched NCERT syllabus context above.\n"
-                "- Keep the teaching plan chapter-aware and classroom-ready.\n"
-                "- Use the actual NCERT concepts, events, people, themes, or skills present in the retrieved context.\n"
-                "- Do not invent other books, chapters, or external sources.\n"
-                "- Do not include a YouTube link.\n"
-                "- Do not include a Learn More section. The app will append the Source section separately.\n"
-            )
-        else:
-            match_instruction = (
-                "- No NCERT syllabus match was found. Build the lesson for the requested topic itself.\n"
-                "- Do not substitute another chapter or textbook topic.\n"
-                "- Add a Learn More section at the end with exactly one student-friendly YouTube link relevant to the requested topic.\n"
-            )
 
         user_prompt = (
             f"Teacher request\n"
             f"Grade/Class: {data.grade}\n"
             f"Subject: {data.subject}\n"
-            f"Preferred language: {data.preferred_language}\n"
+            f"Preferred language: {preferred_language}\n"
             f"Topic: {data.topic}\n"
             f"Duration (minutes): {data.duration_minutes}\n\n"
-            f"NCERT syllabus context\n"
-            f"{context_block}\n\n"
+            "NCERT instruction\n"
+            "- Do not use any provided NCERT context; no NCERT content is included in this prompt.\n"
+            "- Use your own knowledge to keep the lesson aligned to NCERT where possible.\n"
+            "- The final block must be generated by the LLM; the app will not append Source separately.\n"
+            "- If possible, identify the relevant NCERT source and add it at the very bottom in this format:\n"
+            "  Source:\n"
+            "  NCERT\n"
+            "  Book: <book name>\n"
+            "  Unit: <unit name or number, if known>\n"
+            "  Chapter: <chapter name or number, if known>\n"
+            "- Only include Book, Unit, or Chapter lines when you are reasonably confident.\n"
+            "- If the preferred language is Hindi, use the heading 'स्रोत:' instead of 'Source:' and keep URLs unchanged.\n"
+            "- If you are not reasonably confident about the NCERT source, omit the Source block and add Learn More with exactly one YouTube search link at the very bottom.\n\n"
             "Instructions\n"
-            f"{match_instruction}"
             "- Start immediately with the summary block. Do not add any intro sentence before it.\n"
-            "- Start with this exact summary block:\n"
-            "  Lesson Planning\n"
-            f"  Topic: {data.topic}\n"
-            f"  Grade/Class: {data.grade}\n"
-            f"  Subject: {data.subject}\n"
-            f"  Duration: {data.duration_minutes} minutes\n"
             "- Use the exact section headings and order requested.\n"
             "- Put the timing in the same heading line for sections 1 to 7, for example: '1. Opening (6 min)'.\n"
             "- This is a plan, not details. Expect the teacher to generate details in class.\n"
@@ -115,13 +101,173 @@ class PromptBuilder:
             f"- {language_instruction}\n"
             "- Avoid generic filler such as 'Introduce the topic', 'Explain the concept', 'Use examples', or 'Review the lesson'. "
             "Replace them with the actual teaching moves, actual concepts, and actual student tasks for this topic.\n"
-            f"- Use this time distribution exactly:\n{timing_block}\n\n"
+            f"- Use this time distribution exactly:\n{timing_block}\n"
+            "- End with exactly one final reference block: either Source/स्रोत with NCERT details, or Learn More/और सीखें with one YouTube link.\n\n"
             "Return in this exact plain-text shape:\n"
+            f"{response_shape}"
+        )
+
+        log_event(
+            logger,
+            "prompt_builder_ncert_context_not_sent",
+            grade=data.grade,
+            subject=data.subject,
+            topic=data.topic,
+            preferred_language=preferred_language,
+            local_ncert_rows_available=len(data.matched_syllabus_rows),
+            local_ncert_snippets_available=len(data.retrieved_snippets),
+        )
+
+        return PromptBundle(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            metadata={
+                "grade": data.grade,
+                "subject": data.subject,
+                "preferred_language": preferred_language,
+                "topic": data.topic,
+                "duration_minutes": data.duration_minutes,
+                "retrieved_snippets": [],
+                "matched_syllabus_rows": [],
+                "has_ncert_match": False,
+                "timing_map": timing_map,
+                "ncert_context_sent_to_llm": False,
+            },
+        )
+
+    def _language_instruction(self, preferred_language: str) -> str:
+        key = language_key(preferred_language)
+        if key == "hinglish":
+            return (
+                "Write all visible generated content in simple Hinglish using Roman script only. "
+                "Do not use Devanagari. Use natural teacher-friendly Indian classroom wording with a light Hindi-English mix. "
+                "Keep labels short and WhatsApp-friendly."
+            )
+        if key == "hindi":
+            return (
+                "Write all visible generated lesson content in simple Hindi using Devanagari script only. "
+                "Do not write Roman Hindi or Hinglish. Translate section headings, labels, bullets, teaching tips, prompts, and the subject metadata value into Hindi/Devanagari. "
+                "Keep any URLs unchanged."
+            )
+        return "Write all visible generated content in clear, simple English."
+
+    def _response_shape(
+        self,
+        *,
+        preferred_language: str,
+        topic: str,
+        grade: str,
+        subject: str,
+        duration_minutes: int,
+    ) -> str:
+        key = language_key(preferred_language)
+        subject_for_display = subject_display_name(subject, language=preferred_language)
+        if key == "hindi":
+            return (
+                "पाठ योजना\n"
+                f"टॉपिक: {topic}\n"
+                f"ग्रेड/कक्षा: {grade}\n"
+                f"विषय: {subject_for_display}\n"
+                f"अवधि: {duration_minutes} मिनट\n\n"
+                "पाठ शीर्षक\n"
+                "- <छोटा विषय-विशेष शीर्षक>\n\n"
+                "उद्देश्य\n"
+                "- <उद्देश्य 1>\n"
+                "- <उद्देश्य 2>\n"
+                "- <उद्देश्य 3>\n\n"
+                "1. शुरुआत (<time>)\n"
+                "- प्रश्न: <छोटा आरंभिक प्रश्न>\n"
+                "- शिक्षक गतिविधि: <छोटा कदम>\n"
+                "- जोड़ी चर्चा: <छोटा विद्यार्थी संकेत>\n\n"
+                "2. अवधारणा शिक्षण (<time>)\n"
+                "- <अवधारणा बिंदु 1>\n"
+                "- <अवधारणा बिंदु 2>\n"
+                "- <अवधारणा बिंदु 3>\n\n"
+                "3. निर्देशित अभ्यास (<time>)\n"
+                "- गतिविधि: <छोटी गतिविधि>\n"
+                "- विद्यार्थी कार्य: <विद्यार्थी क्या करेंगे>\n"
+                "- शिक्षक जाँच: <शिक्षक क्या पूछेंगे या जाँचेंगे>\n\n"
+                "4. अवधारणा सुदृढ़ीकरण (<time>)\n"
+                "- <छोटा तुलना/मजबूती बिंदु>\n"
+                "- <छोटा मजबूती बिंदु>\n\n"
+                "5. स्वतंत्र अभ्यास (<time>)\n"
+                "- <छोटा स्वतंत्र कार्य>\n"
+                "- <छोटा उत्तर संकेत>\n\n"
+                "6. मूल्यांकन / जाँच (<time>)\n"
+                "- <छोटा जाँच प्रश्न>\n"
+                "- <छोटा जाँच प्रश्न>\n"
+                "- <छोटा जाँच प्रश्न>\n\n"
+                "7. समापन (<time>)\n"
+                "- समापन: <छोटा दोहराव>\n"
+                "- एग्ज़िट टिकट: <छोटा एग्ज़िट प्रश्न>\n\n"
+                "शिक्षण सुझाव\n"
+                "- <छोटा सुझाव>\n"
+                "- <छोटा सुझाव>\n\n"
+                "स्रोत:\n"
+                "NCERT\n"
+                "Book: <book name, if known>\n"
+                "Unit: <unit, if known>\n"
+                "Chapter: <chapter, if known>\n\n"
+                "OR\n\n"
+                "और सीखें\n"
+                "- <one YouTube link only>"
+            )
+        if key == "hinglish":
+            return (
+                "Lesson Planning\n"
+                f"Topic: {topic}\n"
+                f"Grade/Class: {grade}\n"
+                f"Subject: {subject_for_display}\n"
+                f"Duration: {duration_minutes} minutes\n\n"
+                "Lesson Title\n"
+                "- <short topic-specific title>\n\n"
+                "Objectives\n"
+                "- <objective 1 in Hinglish>\n"
+                "- <objective 2 in Hinglish>\n"
+                "- <objective 3 in Hinglish>\n\n"
+                "1. Opening (<time>)\n"
+                "- Hook Question: <short hook in Hinglish>\n"
+                "- Teacher Move: <short move in Hinglish>\n"
+                "- Quick Pair Prompt: <short student prompt in Hinglish>\n\n"
+                "2. Concept Teaching (<time>)\n"
+                "- <concept point 1 in Hinglish>\n"
+                "- <concept point 2 in Hinglish>\n"
+                "- <concept point 3 in Hinglish>\n\n"
+                "3. Guided Practice (<time>)\n"
+                "- Activity: <short activity title in Hinglish>\n"
+                "- Student Action: <what students do in Hinglish>\n"
+                "- Teacher Check: <what teacher checks in Hinglish>\n\n"
+                "4. Concept Reinforcement (<time>)\n"
+                "- <short reinforce bullet in Hinglish>\n"
+                "- <short reinforce bullet in Hinglish>\n\n"
+                "5. Independent Practice (<time>)\n"
+                "- <short independent task in Hinglish>\n"
+                "- <short response prompt in Hinglish>\n\n"
+                "6. Assessment / Check (<time>)\n"
+                "- <short check question in Hinglish>\n"
+                "- <short check question in Hinglish>\n"
+                "- <short check question in Hinglish>\n\n"
+                "7. Closure (<time>)\n"
+                "- Wrap-Up: <short recap in Hinglish>\n"
+                "- Exit Ticket: <short exit prompt in Hinglish>\n\n"
+                "Teaching Tips\n"
+                "- <short tip in Hinglish>\n"
+                "- <short tip in Hinglish>\n\n"
+                "Source:\n"
+                "NCERT\n"
+                "Book: <book name, if known>\n"
+                "Unit: <unit, if known>\n"
+                "Chapter: <chapter, if known>\n\n"
+                "OR\n\n"
+                "Learn More\n"
+                "- <one YouTube link only>"
+            )
+        return (
             "Lesson Planning\n"
-            "Topic: <requested topic>\n"
-            "Grade/Class: <grade>\n"
-            "Subject: <subject>\n"
-            "Duration: <duration> minutes\n\n"
+            f"Topic: {topic}\n"
+            f"Grade/Class: {grade}\n"
+            f"Subject: {subject_for_display}\n"
+            f"Duration: {duration_minutes} minutes\n\n"
             "Lesson Title\n"
             "- <short topic-specific title>\n\n"
             "Objectives\n"
@@ -155,51 +301,22 @@ class PromptBuilder:
             "- Exit Ticket: <short exit prompt>\n\n"
             "Teaching Tips\n"
             "- <short tip>\n"
-            "- <short tip>"
+            "- <short tip>\n\n"
+            "Source:\n"
+            "NCERT\n"
+            "Book: <book name, if known>\n"
+            "Unit: <unit, if known>\n"
+            "Chapter: <chapter, if known>\n\n"
+            "OR\n\n"
+            "Learn More\n"
+            "- <one YouTube link only>"
         )
-
-        if not has_ncert_match:
-            user_prompt += "\n\nLearn More\n- <one YouTube link only>"
-
-        return PromptBundle(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            metadata={
-                "grade": data.grade,
-                "subject": data.subject,
-                "preferred_language": data.preferred_language,
-                "topic": data.topic,
-                "duration_minutes": data.duration_minutes,
-                "retrieved_snippets": data.retrieved_snippets,
-                "matched_syllabus_rows": data.matched_syllabus_rows,
-                "has_ncert_match": has_ncert_match,
-                "timing_map": timing_map,
-            },
-        )
-
-    def _language_instruction(self, preferred_language: str) -> str:
-        language = preferred_language.strip().casefold()
-        if language == "hinglish":
-            return (
-                "Write the lesson body in simple Hinglish using Roman script only. "
-                "Do not use Devanagari. Keep section headings in English. "
-                "Use natural teacher-friendly Indian classroom wording with a light Hindi-English mix."
-            )
-        if language == "hindi":
-            return (
-                "Write all generated lesson content in simple Hindi using Devanagari script only. "
-                "Do not write Roman Hindi or Hinglish. "
-                "Keep the structural headings and summary labels exactly in English so the app can parse the lesson, "
-                "but make the lesson title, objectives, bullets, teaching tips, and other teaching content Hindi in Devanagari."
-            )
-        return "Write the lesson in clear, simple English."
 
     def _content_depth_instruction(self, subject: str) -> str:
         subject_key = subject.strip().casefold()
         if subject_key in {"physics", "science"}:
             return (
-                "Keep the science correct and grade-appropriate. Use the real concept names, short cause-and-effect ideas, "
-                "and one simple classroom demonstration or observation when useful."
+                "Keep the science content specific: include the actual concept, cause/effect, vocabulary, and one demonstration or observation when useful."
             )
         if subject_key in {"mathematics", "maths", "math"}:
             return (

@@ -162,30 +162,44 @@ class LessonPayloadBuilder:
             "topic_name": topic.strip(),
         }
 
-        if "Source:" in lines:
-            source_index = lines.index("Source:")
-            following = lines[source_index + 1 : source_index + 8]
+        source_index = self._find_source_index(lines)
+        if source_index is None:
+            return source_type, source_reference
 
-            if any(line.casefold() == "ncert" for line in following):
+        first_source_line = lines[source_index]
+        following = [first_source_line] + lines[source_index + 1 : source_index + 8]
+        source_blob = "\n".join(following)
+
+        if "ncert" in source_blob.casefold() or "एनसीईआरटी" in source_blob or "एन.सी.ई.आर.टी" in source_blob:
+            source_type = "ncert_syllabus"
+
+        for line in following:
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            key = key.strip().casefold()
+            value = value.strip()
+            if not value or ("<" in value and ">" in value):
+                continue
+            if key == "source" and "ncert" in value.casefold():
                 source_type = "ncert_syllabus"
-
-            for line in following:
-                if ":" not in line:
-                    continue
-                key, value = line.split(":", 1)
-                key = key.strip().casefold()
-                value = value.strip()
-                if not value:
-                    continue
-                if key == "book":
-                    source_reference["book"] = value
-                elif key == "unit":
-                    source_reference["unit"] = value
-                elif key == "chapter":
-                    source_reference["chapter"] = value
-                    source_reference["topic_name"] = value
+            elif key == "book":
+                source_reference["book"] = value
+            elif key == "unit":
+                source_reference["unit"] = value
+            elif key == "chapter":
+                source_reference["chapter"] = value
+                source_reference["topic_name"] = value
 
         return source_type, source_reference
+
+    def _find_source_index(self, lines: list[str]) -> int | None:
+        for index, line in enumerate(lines):
+            normalized = self._normalize_heading(line)
+            lowered = line.casefold().strip()
+            if normalized in {"source", "स्रोत"} or lowered.startswith("source:") or lowered.startswith("स्रोत:"):
+                return index
+        return None
 
     def _normalize_heading(self, line: str) -> str:
         return re.sub(r"\s*\([^)]*\)\s*$", "", line.rstrip(":").strip()).casefold()
