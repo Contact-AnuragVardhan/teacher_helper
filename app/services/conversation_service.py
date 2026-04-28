@@ -37,8 +37,8 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_all_lessons": "सभी पाठ",
         "btn_profile": "प्रोफ़ाइल",
         "new_lesson_without_profile": "कृपया पहले अपनी प्रोफ़ाइल पूरी करें।\nआपका नाम क्या है?",
-        "new_lesson_topic_prompt": "आप किस विषय पर पाठ पढ़ाना चाहते हैं? उदाहरण: \"The Portrait of a Lady\"",
-        "new_lesson_topic_invalid": "कृपया पाठ का विषय लिखें, उदाहरण: \"The Portrait of a Lady\"।",
+        "new_lesson_topic_prompt": "आप किस विषय पर पाठ पढ़ाना चाहते हैं? उदाहरण: \"झाँसी की रानी\"",
+        "new_lesson_topic_invalid": "कृपया पाठ का विषय लिखें, उदाहरण: \"झाँसी की रानी\"।",
         "new_lesson_grade_prompt": "इस पाठ के लिए ग्रेड/कक्षा लिखें। उदाहरण: 1, 2, 3",
         "new_lesson_subject_prompt": "इस पाठ का विषय/सब्जेक्ट लिखें। उदाहरण: English",
         "duration_prompt": "कक्षा की अवधि मिनटों में लिखें। उदाहरण: 35",
@@ -50,9 +50,9 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_cancel": "रद्द करें",
         "save_invalid": "कृपया एक विकल्प चुनें:\n1 → पाठ सेव करें\n2 → रद्द करें",
         "lesson_cancelled": "पाठ सेव नहीं किया गया।",
-        "lesson_name_prompt": "कृपया इस पाठ का नाम लिखें। उदाहरण: \"The Portrait of a Lady\"",
-        "lesson_name_invalid": "पाठ का नाम खाली नहीं हो सकता। कृपया पाठ का नाम लिखें, उदाहरण: \"The Portrait of a Lady\"।",
-        "duplicate_lesson_name": "इस नाम से एक पाठ पहले से मौजूद है। कृपया कोई दूसरा नाम लिखें, उदाहरण \"The Portrait of a Lady\"।",
+        "lesson_name_prompt": "कृपया इस पाठ का नाम लिखें। उदाहरण: \"झाँसी की रानी\"",
+        "lesson_name_invalid": "पाठ का नाम खाली नहीं हो सकता। कृपया पाठ का नाम लिखें, उदाहरण: \"झाँसी की रानी\"।",
+        "duplicate_lesson_name": "इस नाम से एक पाठ पहले से मौजूद है। कृपया कोई दूसरा नाम लिखें, उदाहरण \"झाँसी की रानी\"।",
         "lesson_saved": "आपका पाठ सेव हो गया है।",
         "profile_start": "आइए आपकी प्रोफ़ाइल सेट करते हैं। आपका नाम क्या है?",
         "profile_name_prompt": "कृपया अपना नाम लिखें।",
@@ -114,8 +114,8 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_all_lessons": "All Lessons",
         "btn_profile": "My Profile",
         "new_lesson_without_profile": "Please complete your profile first.\nWhat is your name?",
-        "new_lesson_topic_prompt": "What lesson topic would you like to teach? Example: \"The Portrait of a Lady\"",
-        "new_lesson_topic_invalid": "Please enter a lesson topic, for example \"The Portrait of a Lady\".",
+        "new_lesson_topic_prompt": "What lesson topic would you like to teach? Example: \"Jhansi Ki Rani\"",
+        "new_lesson_topic_invalid": "Please enter a lesson topic, for example \"Jhansi Ki Rani\".",
         "new_lesson_grade_prompt": "Please enter the grade/class for this lesson. Example: 1, 2, 3",
         "new_lesson_subject_prompt": "Please enter the subject for this lesson. Example: English",
         "duration_prompt": "Please enter class duration in minutes. Example: 35",
@@ -127,9 +127,9 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_cancel": "Cancel",
         "save_invalid": "Please choose one option:\n1 → Save Lesson\n2 → Cancel",
         "lesson_cancelled": "Lesson was not saved.",
-        "lesson_name_prompt": "Please enter a name for this lesson. Example: \"The Portrait of a Lady\"",
-        "lesson_name_invalid": "Lesson name cannot be blank. Please enter a lesson name, for example \"The Portrait of a Lady\".",
-        "duplicate_lesson_name": "A lesson with this name already exists. Please enter another lesson name, for example \"The Portrait of a Lady\".",
+        "lesson_name_prompt": "Please enter a name for this lesson. Example: \"Jhansi Ki Rani\"",
+        "lesson_name_invalid": "Lesson name cannot be blank. Please enter a lesson name, for example \"Jhansi Ki Rani\".",
+        "duplicate_lesson_name": "A lesson with this name already exists. Please enter another lesson name, for example \"Jhansi Ki Rani\".",
         "lesson_saved": "Your lesson has been saved.",
         "profile_start": "Let us set up your profile. What is your name?",
         "profile_name_prompt": "Please enter your name.",
@@ -191,8 +191,8 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_all_lessons": "All Lessons",
         "btn_profile": "Profile",
         "new_lesson_without_profile": "Please pehle apni profile complete karein.\nAapka naam kya hai?",
-        "new_lesson_topic_prompt": "Aap kis topic par lesson banana chahte hain? Example: \"The Portrait of a Lady\"",
-        "new_lesson_topic_invalid": "Please lesson topic likhein, example: \"The Portrait of a Lady\".",
+        "new_lesson_topic_prompt": "Aap kis topic par lesson banana chahte hain? Example: \"Jhansi Ki Rani\"",
+        "new_lesson_topic_invalid": "Please lesson topic likhein, example: \"Jhansi Ki Rani\".",
         "new_lesson_grade_prompt": "Is lesson ke liye grade/class likhein. Example: 1, 2, 3",
         "new_lesson_subject_prompt": "Is lesson ka subject likhein. Example: English",
         "duration_prompt": "Class duration minutes mein likhein. Example: 35",
@@ -204,9 +204,9 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_cancel": "Cancel",
         "save_invalid": "Please ek option choose karein:\n1 → Save Lesson\n2 → Cancel",
         "lesson_cancelled": "Lesson save nahi kiya gaya.",
-        "lesson_name_prompt": "Please is lesson ka naam likhein. Example: \"The Portrait of a Lady\"",
-        "lesson_name_invalid": "Lesson name blank nahi ho sakta. Please lesson name likhein, example \"The Portrait of a Lady\".",
-        "duplicate_lesson_name": "Is naam se lesson already exist karta hai. Please dusra naam likhein, example \"The Portrait of a Lady\".",
+        "lesson_name_prompt": "Please is lesson ka naam likhein. Example: \"Jhansi Ki Rani\"",
+        "lesson_name_invalid": "Lesson name blank nahi ho sakta. Please lesson name likhein, example \"Jhansi Ki Rani\".",
+        "duplicate_lesson_name": "Is naam se lesson already exist karta hai. Please dusra naam likhein, example \"Jhansi Ki Rani\".",
         "lesson_saved": "Aapka lesson save ho gaya hai.",
         "profile_start": "Chaliye profile setup karte hain. Aapka naam kya hai?",
         "profile_name_prompt": "Please apna naam likhein.",
@@ -317,9 +317,12 @@ class ConversationService:
         return ConversationReply(reply=reply, current_state=state.value, outbound=outbound)
 
     def _text(self, language: str | None, key: str, **kwargs) -> str:
-        lang = language_key(language)
-        template = TEXT.get(lang, TEXT["hindi"]).get(key) or TEXT["english"].get(key) or key
+        lang = language_key(language or self._configured_default_language())
+        template = TEXT.get(lang, TEXT["english"]).get(key) or TEXT["english"].get(key) or key
         return template.format(**kwargs)
+
+    def _configured_default_language(self) -> str:
+        return self.settings.default_language
 
     def _localize_validation_error(self, error: str | None, language: str) -> str | None:
         if not error:
@@ -340,7 +343,14 @@ class ConversationService:
         return error
 
     def _teacher_language(self, teacher) -> str:
-        return normalize_language(getattr(teacher, "preferred_language", None)) or DEFAULT_LANGUAGE
+        default_language = self._configured_default_language()
+        preferred_language = (getattr(teacher, "preferred_language", None) or "").strip()
+        if not preferred_language:
+            return default_language
+        normalized_language = normalize_language(preferred_language, default=None)
+        if normalized_language and normalized_language.casefold() in self.settings.supported_languages_casefold:
+            return normalized_language
+        return default_language
 
     def _language_options_text(self) -> str:
         languages = self.settings.supported_languages_list or [DEFAULT_LANGUAGE]

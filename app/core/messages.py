@@ -17,7 +17,7 @@ ALL_LESSONS_LIST_PREFIX = "Here are all your saved lessons:"
 ALL_LESSONS_SELECTION_PROMPT = "Reply with the exact lesson name to view it, or send 0 to return to the main menu."
 
 DUPLICATE_LESSON_NAME = (
-    'A lesson with this name already exists. Please enter another lesson name, for example "The Portrait of a Lady".'
+    'A lesson with this name already exists. Please enter another lesson name, for example "Jhansi Ki Rani".'
 )
 
 PROFILE_START = "Let us set up your profile. What is your name?"
@@ -31,11 +31,11 @@ NEW_LESSON_WITHOUT_PROFILE = (
     "Please complete your profile first.\n"
     "What is your name?"
 )
-NEW_LESSON_TOPIC_PROMPT = 'What lesson topic would you like to teach? Example: "The Portrait of a Lady"'
-NEW_LESSON_TOPIC_INVALID = 'Please enter a lesson topic, for example "The Portrait of a Lady".'
+NEW_LESSON_TOPIC_PROMPT = 'What lesson topic would you like to teach? Example: "Jhansi Ki Rani"'
+NEW_LESSON_TOPIC_INVALID = 'Please enter a lesson topic, for example "Jhansi Ki Rani".'
 NEW_LESSON_SAVE_PROMPT_PREFIX = "Here is your generated lesson plan:"
-NEW_LESSON_NAME_PROMPT = 'Please enter a name for this lesson. Example: "The Portrait of a Lady"'
-NEW_LESSON_NAME_INVALID = 'Lesson name cannot be blank. Please enter a lesson name, for example "The Portrait of a Lady".'
+NEW_LESSON_NAME_PROMPT = 'Please enter a name for this lesson. Example: "Jhansi Ki Rani"'
+NEW_LESSON_NAME_INVALID = 'Lesson name cannot be blank. Please enter a lesson name, for example "Jhansi Ki Rani".'
 LESSON_SAVED = "Your lesson has been saved."
 LESSON_CANCELLED = "Lesson creation was cancelled."
 

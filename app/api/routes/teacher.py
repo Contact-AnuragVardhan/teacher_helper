@@ -28,7 +28,12 @@ def get_teacher(whatsapp_number: str, db: Session = Depends(get_db)) -> TeacherR
 @router.post("", response_model=TeacherResponse)
 def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db)) -> TeacherResponse:
     settings = get_settings()
-    preferred_language = normalize_language(payload.preferred_language, default=None)
+    raw_language = (payload.preferred_language or "").strip()
+    preferred_language = (
+        normalize_language(raw_language, default=None)
+        if raw_language
+        else settings.default_language
+    )
 
     log_event(
         logger,

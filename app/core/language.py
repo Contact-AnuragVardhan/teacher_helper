@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 
-DEFAULT_LANGUAGE = "Hindi"
+DEFAULT_LANGUAGE = "English"
 SUPPORTED_LANGUAGE_NAMES = ("Hindi", "English", "Hinglish")
 
 _LANGUAGE_ALIASES = {

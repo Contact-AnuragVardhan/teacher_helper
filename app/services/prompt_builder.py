@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 
+from app.core.config import get_settings
 from app.core.language import DEFAULT_LANGUAGE, language_key, normalize_language
 from app.core.logging import get_logger, log_event
 from app.services.lesson_generation_provider import PromptBundle
@@ -23,7 +24,8 @@ class PromptBuilder:
         # Important: NCERT snippets/rows are intentionally NOT included in the prompt.
         # The client requirement is that the LLM should use its own NCERT knowledge if possible,
         # instead of receiving our stored NCERT chunks as context.
-        preferred_language = normalize_language(data.preferred_language) or DEFAULT_LANGUAGE
+        settings = get_settings()
+        preferred_language = normalize_language(data.preferred_language, default=None) or settings.default_language
         timing_map = self._allocate_timings(data.duration_minutes)
         timing_block = (
             f"1. Opening -> ({timing_map['opening']} min)\n"

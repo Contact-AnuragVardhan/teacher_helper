@@ -4,6 +4,8 @@ from typing import Literal
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.core.language import DEFAULT_LANGUAGE, normalize_language
+
 
 class Settings(BaseSettings):
     app_name: str = Field(default="Teacher Helper", validation_alias=AliasChoices("app_name", "APP_NAME"))
@@ -29,7 +31,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("session_timeout_minutes", "SESSION_TIMEOUT_MINUTES"),
     )
     supported_languages: str = Field(
-        default="Hindi,English,Hinglish",
+        default="English,Hindi,Hinglish",
         validation_alias=AliasChoices("supported_languages", "SUPPORTED_LANGUAGES"),
     )
 
@@ -115,6 +117,15 @@ class Settings(BaseSettings):
     @property
     def supported_languages_casefold(self) -> set[str]:
         return {item.casefold() for item in self.supported_languages_list}
+
+    @property
+    def default_language(self) -> str:
+        """Use the first configured SUPPORTED_LANGUAGES value as the app default."""
+        for item in self.supported_languages_list:
+            normalized = normalize_language(item, default=None)
+            if normalized:
+                return normalized
+        return DEFAULT_LANGUAGE
 
     @property
     def profile_allowed_grades_list(self) -> list[str]:

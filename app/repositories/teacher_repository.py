@@ -1,7 +1,8 @@
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from app.core.language import DEFAULT_LANGUAGE, normalize_language
+from app.core.config import get_settings
+from app.core.language import normalize_language
 from app.core.logging import get_logger, log_event
 from app.models.teacher_profile import TeacherProfile
 from app.utils.subject_normalization import normalize_subject
@@ -68,7 +69,14 @@ class TeacherRepository:
         teacher = self.get_by_whatsapp_number(canonical_number)
         action = "updated" if teacher else "created"
         normalized_subject = normalize_subject(default_subject)
-        normalized_language = normalize_language(preferred_language) or DEFAULT_LANGUAGE
+        settings = get_settings()
+        preferred_language_value = (preferred_language or "").strip()
+        normalized_language = (
+            normalize_language(preferred_language_value, default=None)
+            if preferred_language_value
+            else settings.default_language
+        )
+        normalized_language = normalized_language or settings.default_language
 
         if teacher:
             teacher.whatsapp_number = canonical_number or teacher.whatsapp_number

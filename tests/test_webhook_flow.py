@@ -81,7 +81,7 @@ def test_new_lesson_prompts_include_examples(client):
     create_profile_via_webhook(client)
 
     response = send(client, "1")
-    assert 'Example: "The Portrait of a Lady"' in response.json()["reply"]
+    assert 'Example: "Jhansi Ki Rani"' in response.json()["reply"]
 
     response = send(client, "Plants")
     assert "Example: 1, 2, 3" in response.json()["reply"]
