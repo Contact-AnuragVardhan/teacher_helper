@@ -11,7 +11,7 @@ from app.services.lesson_generation_provider import LessonGenerationProvider
 from app.services.llm_provider_openai import OpenAILessonGenerationProvider
 from app.services.ncert_retrieval_service import NcertRetrievalService
 from app.services.prompt_builder import PromptBuilder, PromptBuilderInput
-from app.utils.subject_normalization import normalize_subject
+from app.utils.subject_normalization import normalize_subject, subject_display_name
 from urllib.parse import unquote
 
 logger = get_logger(__name__)
@@ -184,6 +184,16 @@ class LessonGeneratorService:
             raw_text=raw_text,
         )
 
+        # Do not build or append an app-generated Source block from local NCERT rows here.
+        # Client requirement: the LLM owns the final Source/Learn More block. Because this
+        # normalizer rebuilds the lesson body, we only preserve the Source block that the
+        # LLM already returned; we do not create a new Source block in the app.
+        #
+        # Previously supported app-side behavior would look like this, but it is intentionally
+        # disabled now:
+        # app_source_block = self._build_source_block(rows)
+        # if app_source_block:
+        #     normalized_text = f"{normalized_text}\n\n{app_source_block}".strip()
         if llm_source_block:
             normalized_text = f"{normalized_text}\n\n{llm_source_block}".strip()
 
@@ -770,19 +780,20 @@ class LessonGeneratorService:
         duration_minutes: int,
         preferred_language: str = "English",
     ) -> str:
+        subject_for_display = subject_display_name(subject, language=preferred_language)
         if self._is_hindi_language(preferred_language):
             return (
                 "पाठ योजना\n"
                 f"टॉपिक: {topic.strip()}\n"
                 f"ग्रेड/कक्षा: {grade.strip()}\n"
-                f"विषय: {subject.strip()}\n"
-                f"अवधि: {int(duration_minutes)} minutes"
+                f"विषय: {subject_for_display}\n"
+                f"अवधि: {int(duration_minutes)} मिनट"
             )
         return (
             "Lesson Planning\n"
             f"Topic: {topic.strip()}\n"
             f"Grade/Class: {grade.strip()}\n"
-            f"Subject: {subject.strip()}\n"
+            f"Subject: {subject_for_display}\n"
             f"Duration: {int(duration_minutes)} minutes"
         )
 

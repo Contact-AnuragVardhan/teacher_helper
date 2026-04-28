@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from datetime import datetime
+import re
 
 from sqlalchemy.orm import Session
 
@@ -40,7 +42,7 @@ TEXT: dict[str, dict[str, str]] = {
         "new_lesson_topic_prompt": "आप किस विषय पर पाठ पढ़ाना चाहते हैं? उदाहरण: \"झाँसी की रानी\"",
         "new_lesson_topic_invalid": "कृपया पाठ का विषय लिखें, उदाहरण: \"झाँसी की रानी\"।",
         "new_lesson_grade_prompt": "इस पाठ के लिए ग्रेड/कक्षा लिखें। उदाहरण: 1, 2, 3",
-        "new_lesson_subject_prompt": "इस पाठ का विषय/सब्जेक्ट लिखें। उदाहरण: English",
+        "new_lesson_subject_prompt": "इस पाठ का विषय/सब्जेक्ट लिखें। उदाहरण: गणित",
         "duration_prompt": "कक्षा की अवधि मिनटों में लिखें। उदाहरण: 35",
         "invalid_duration": "कृपया कक्षा की अवधि मिनटों में लिखें, उदाहरण 35।",
         "generated_lesson_prefix": "यह आपकी तैयार की गई पाठ योजना है:",
@@ -50,6 +52,11 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_cancel": "रद्द करें",
         "save_invalid": "कृपया एक विकल्प चुनें:\n1 → पाठ सेव करें\n2 → रद्द करें",
         "lesson_cancelled": "पाठ सेव नहीं किया गया।",
+        "lesson_name_suggestion_body": "सुझाया गया पाठ नाम:\n{lesson_name}\n\nक्या आप इसी नाम से सेव करना चाहते हैं?",
+        "lesson_name_suggestion_footer": "हाँ या नहीं चुनें",
+        "lesson_name_suggestion_invalid": "कृपया हाँ चुनें अगर इसी नाम से सेव करना है, या नहीं चुनें अगर अपना नाम लिखना है।",
+        "btn_yes": "हाँ",
+        "btn_no": "नहीं",
         "lesson_name_prompt": "कृपया इस पाठ का नाम लिखें। उदाहरण: \"झाँसी की रानी\"",
         "lesson_name_invalid": "पाठ का नाम खाली नहीं हो सकता। कृपया पाठ का नाम लिखें, उदाहरण: \"झाँसी की रानी\"।",
         "duplicate_lesson_name": "इस नाम से एक पाठ पहले से मौजूद है। कृपया कोई दूसरा नाम लिखें, उदाहरण \"झाँसी की रानी\"।",
@@ -57,7 +64,7 @@ TEXT: dict[str, dict[str, str]] = {
         "profile_start": "आइए आपकी प्रोफ़ाइल सेट करते हैं। आपका नाम क्या है?",
         "profile_name_prompt": "कृपया अपना नाम लिखें।",
         "profile_grade_prompt": "आपकी डिफ़ॉल्ट ग्रेड/कक्षा क्या है? उदाहरण: 1, 2, 3",
-        "profile_subject_prompt": "आप कौन सा विषय पढ़ाते हैं? उदाहरण: English",
+        "profile_subject_prompt": "आप कौन सा विषय पढ़ाते हैं? उदाहरण: गणित",
         "profile_language_prompt": "कृपया पसंदीदा भाषा लिखें। विकल्प: {options}",
         "profile_language_invalid": "यह भाषा अभी समर्थित नहीं है। कृपया नीचे दिए गए विकल्पों में से एक लिखें।",
         "profile_saved": "आपकी प्रोफ़ाइल सेव हो गई है।",
@@ -65,7 +72,7 @@ TEXT: dict[str, dict[str, str]] = {
         "current_profile": "वर्तमान प्रोफ़ाइल:\nनाम: {name}\nग्रेड: {grade}\nविषय: {subject}\nभाषा: {language}",
         "profile_name_edit": "अपना नाम लिखें, या वर्तमान नाम रखने के लिए 'same' भेजें।",
         "profile_grade_edit": "वर्तमान ग्रेड/कक्षा: {grade}\nनई ग्रेड/कक्षा लिखें, या रखने के लिए 'same' भेजें। उदाहरण: 1, 2, 3",
-        "profile_subject_edit": "वर्तमान विषय: {subject}\nनया विषय लिखें, या रखने के लिए 'same' भेजें। उदाहरण: English",
+        "profile_subject_edit": "वर्तमान विषय: {subject}\nनया विषय लिखें, या रखने के लिए 'same' भेजें। उदाहरण: गणित",
         "profile_language_edit": "वर्तमान भाषा: {language}\nनई भाषा लिखें, या रखने के लिए 'same' भेजें। विकल्प: {options}",
         "all_lessons_empty": "आपके पास अभी कोई सेव या साझा किया गया पाठ नहीं है।",
         "all_lessons_reply": "सभी पाठ:\nकृपया नीचे दी गई सूची से एक पाठ चुनें।",
@@ -127,6 +134,11 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_cancel": "Cancel",
         "save_invalid": "Please choose one option:\n1 → Save Lesson\n2 → Cancel",
         "lesson_cancelled": "Lesson was not saved.",
+        "lesson_name_suggestion_body": "Suggested lesson name:\n{lesson_name}\n\nDo you want to save this lesson with this name?",
+        "lesson_name_suggestion_footer": "Choose Yes or No",
+        "lesson_name_suggestion_invalid": "Please choose Yes to use the suggested name, or No to enter your own lesson name.",
+        "btn_yes": "Yes",
+        "btn_no": "No",
         "lesson_name_prompt": "Please enter a name for this lesson. Example: \"Jhansi Ki Rani\"",
         "lesson_name_invalid": "Lesson name cannot be blank. Please enter a lesson name, for example \"Jhansi Ki Rani\".",
         "duplicate_lesson_name": "A lesson with this name already exists. Please enter another lesson name, for example \"Jhansi Ki Rani\".",
@@ -204,6 +216,11 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_cancel": "Cancel",
         "save_invalid": "Please ek option choose karein:\n1 → Save Lesson\n2 → Cancel",
         "lesson_cancelled": "Lesson save nahi kiya gaya.",
+        "lesson_name_suggestion_body": "Suggested lesson name:\n{lesson_name}\n\nKya aap isi naam se lesson save karna chahte hain?",
+        "lesson_name_suggestion_footer": "Yes ya No choose karein",
+        "lesson_name_suggestion_invalid": "Please Yes choose karein suggested name use karne ke liye, ya No choose karein apna lesson name likhne ke liye.",
+        "btn_yes": "Yes",
+        "btn_no": "No",
         "lesson_name_prompt": "Please is lesson ka naam likhein. Example: \"Jhansi Ki Rani\"",
         "lesson_name_invalid": "Lesson name blank nahi ho sakta. Please lesson name likhein, example \"Jhansi Ki Rani\".",
         "duplicate_lesson_name": "Is naam se lesson already exist karta hai. Please dusra naam likhein, example \"Jhansi Ki Rani\".",
@@ -292,6 +309,7 @@ class ConversationService:
             ConversationState.NEW_LESSON_SUBJECT: self._handle_new_lesson_subject,
             ConversationState.NEW_LESSON_DURATION: self._handle_new_lesson_duration,
             ConversationState.NEW_LESSON_CONFIRM_SAVE: self._handle_new_lesson_confirm_save,
+            ConversationState.NEW_LESSON_CONFIRM_NAME: self._handle_new_lesson_confirm_name,
             ConversationState.NEW_LESSON_NAME: self._handle_new_lesson_name,
             ConversationState.RETRIEVE_LESSON_NAME: self._handle_retrieve_lesson_name,
             ConversationState.LESSON_ACTION_MENU: self._handle_lesson_action_menu,
@@ -317,8 +335,8 @@ class ConversationService:
     ) -> ConversationReply:
         return ConversationReply(reply=reply, current_state=state.value, outbound=outbound)
 
-    def _text(self, language: str | None, key: str, **kwargs) -> str:
-        lang = language_key(language or self._configured_default_language())
+    def _text(self, active_language: str | None, key: str, **kwargs) -> str:
+        lang = language_key(active_language or self._configured_default_language())
         template = TEXT.get(lang, TEXT["english"]).get(key) or TEXT["english"].get(key) or key
         return template.format(**kwargs)
 
@@ -462,6 +480,132 @@ class ConversationService:
                 "buttons": [
                     {"id": "save_lesson", "title": self._text(language, "btn_save")},
                     {"id": "cancel_lesson", "title": self._text(language, "btn_cancel")},
+                ],
+            },
+        )
+
+    def _suggest_lesson_name(self, topic: str | None, language: str | None = None) -> str:
+        base = self._lesson_name_base_for_language(topic, language)
+        date_suffix = datetime.now().strftime("%d_%b_%Y")
+        return f"{base}_{date_suffix}"
+
+    def _lesson_name_base_for_language(self, topic: str | None, language: str | None = None) -> str:
+        base = re.sub(r"\s+", " ", (topic or "").strip())
+        is_hindi = (language or "").strip().casefold() == "hindi"
+
+        if is_hindi:
+            base = self._topic_to_devanagari_lesson_name_base(base)
+            base = re.sub(r"[^0-9\u0900-\u097F]+", "", base)
+            base = base[:48].strip()
+            return base or "पाठ"
+
+        # English/Hinglish saved lesson names use PascalCase/CamelCase style:
+        # "Jhansi Ki Rani" -> "JhansiKiRani". Only the date keeps underscores.
+        base = re.sub(r"[^0-9A-Za-z\u0900-\u097F ]+", " ", base)
+        base = re.sub(r"\s+", " ", base).strip() or "Lesson"
+        base = self._shorten_lesson_name_base(base, max_chars=48)
+        base = self._to_compact_pascal_case(base)
+        return base or "Lesson"
+
+    def _topic_to_devanagari_lesson_name_base(self, value: str) -> str:
+        cleaned = re.sub(r"\s+", " ", (value or "").strip())
+        if not cleaned:
+            return "पाठ"
+
+        # If the teacher already entered the topic in Devanagari, preserve it
+        # and only remove spaces/punctuation for the suggested saved name.
+        if re.search(r"[\u0900-\u097F]", cleaned):
+            return cleaned
+
+        normalized = self._normalize_roman_topic_key(cleaned)
+        phrase_aliases = {
+            "jhansi ki rani": "झाँसी की रानी",
+            "jhansi rani": "झाँसी की रानी",
+            "rani of jhansi": "झाँसी की रानी",
+            "ganit": "गणित",
+            "math": "गणित",
+            "maths": "गणित",
+            "mathematics": "गणित",
+            "vigyan": "विज्ञान",
+            "science": "विज्ञान",
+            "angrezi": "अंग्रेज़ी",
+            "english": "अंग्रेज़ी",
+            "hindi": "हिंदी",
+            "samajik vigyan": "सामाजिक विज्ञान",
+            "social science": "सामाजिक विज्ञान",
+            "social studies": "सामाजिक विज्ञान",
+        }
+        if normalized in phrase_aliases:
+            return phrase_aliases[normalized]
+
+        # A small word-level fallback covers common Hindi classroom words.
+        # Unknown Roman words are kept as-is instead of guessing incorrectly.
+        word_aliases = {
+            "jhansi": "झाँसी",
+            "ki": "की",
+            "rani": "रानी",
+            "ganit": "गणित",
+            "math": "गणित",
+            "maths": "गणित",
+            "mathematics": "गणित",
+            "vigyan": "विज्ञान",
+            "science": "विज्ञान",
+            "samajik": "सामाजिक",
+            "social": "सामाजिक",
+            "studies": "विज्ञान",
+            "angrezi": "अंग्रेज़ी",
+            "english": "अंग्रेज़ी",
+            "hindi": "हिंदी",
+        }
+        words = normalized.split()
+        converted = [word_aliases.get(word, word) for word in words]
+        return " ".join(converted).strip() or cleaned
+
+    def _normalize_roman_topic_key(self, value: str) -> str:
+        value = re.sub(r"([a-z])([A-Z])", r"\1 \2", value)
+        value = re.sub(r"[^0-9A-Za-z]+", " ", value)
+        return re.sub(r"\s+", " ", value).strip().casefold()
+
+    def _to_compact_pascal_case(self, value: str) -> str:
+        words = re.findall(r"[0-9A-Za-z\u0900-\u097F]+", value or "")
+        pieces: list[str] = []
+        for word in words:
+            if re.search(r"[\u0900-\u097F]", word):
+                pieces.append(word)
+            elif word.isupper() and len(word) > 1:
+                pieces.append(word)
+            else:
+                pieces.append(word[:1].upper() + word[1:].lower())
+        return "".join(pieces)
+
+    def _shorten_lesson_name_base(self, value: str, *, max_chars: int) -> str:
+        if len(value) <= max_chars:
+            return value
+
+        words = value.split()
+        shortened = ""
+        for word in words:
+            candidate = f"{shortened} {word}".strip()
+            if len(candidate) > max_chars:
+                break
+            shortened = candidate
+
+        if shortened:
+            return shortened.rstrip("_")
+        return value[:max_chars].rstrip()
+
+    def _confirm_lesson_name_reply(self, lesson_name: str, language: str) -> ConversationReply:
+        return self._reply(
+            self._text(language, "lesson_name_suggestion_body", lesson_name=lesson_name),
+            ConversationState.NEW_LESSON_CONFIRM_NAME,
+            outbound={
+                "type": "buttons",
+                "header": self._text(language, "main_header"),
+                "body": self._text(language, "lesson_name_suggestion_body", lesson_name=lesson_name),
+                "footer": self._text(language, "lesson_name_suggestion_footer"),
+                "buttons": [
+                    {"id": "confirm_suggested_lesson_name", "title": self._text(language, "btn_yes")},
+                    {"id": "enter_custom_lesson_name", "title": self._text(language, "btn_no")},
                 ],
             },
         )
@@ -836,9 +980,11 @@ class ConversationService:
         choice = normalize_choice(text)
 
         if choice in {"1", "yes", "save lesson", "save_lesson", "पाठ सेव करें"}:
-            session.current_state = ConversationState.NEW_LESSON_NAME.value
+            suggested_name = self._suggest_lesson_name(session.temp_topic, language)
+            session.temp_lesson_name = suggested_name
+            session.current_state = ConversationState.NEW_LESSON_CONFIRM_NAME.value
             self.session_repo.save(session)
-            return self._reply(self._text(language, "lesson_name_prompt"), ConversationState.NEW_LESSON_NAME)
+            return self._confirm_lesson_name_reply(suggested_name, language)
 
         if choice in {"2", "no", "cancel", "cancel_lesson", "रद्द करें", "radd"}:
             self.session_repo.reset_for_main_menu(session)
@@ -859,6 +1005,75 @@ class ConversationService:
             },
         )
 
+    def _handle_new_lesson_confirm_name(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+        language = self._teacher_language(teacher)
+        choice = normalize_choice(text)
+
+        if not teacher:
+            session.current_state = ConversationState.PROFILE_NAME.value
+            self.session_repo.save(session)
+            return self._reply(self._text(language, "new_lesson_without_profile"), ConversationState.PROFILE_NAME)
+
+        suggested_name = (session.temp_lesson_name or self._suggest_lesson_name(session.temp_topic, language)).strip()
+        session.temp_lesson_name = suggested_name
+
+        if choice in {"1", "yes", "confirm_suggested_lesson_name", "हाँ", "हां"}:
+            return self._save_generated_lesson_with_name(session, teacher, suggested_name, language)
+
+        if choice in {"2", "no", "enter_custom_lesson_name", "नहीं", "नही"}:
+            session.current_state = ConversationState.NEW_LESSON_NAME.value
+            self.session_repo.save(session)
+            return self._reply(self._text(language, "lesson_name_prompt"), ConversationState.NEW_LESSON_NAME)
+
+        # Backward-compatible browser/local testing support: if someone types a
+        # custom lesson name instead of tapping Yes/No, use that custom name.
+        if text and choice not in {""}:
+            return self._save_generated_lesson_with_name(session, teacher, text.strip(), language)
+
+        return self._reply(
+            self._text(language, "lesson_name_suggestion_invalid"),
+            ConversationState.NEW_LESSON_CONFIRM_NAME,
+            outbound=self._confirm_lesson_name_reply(suggested_name, language).outbound,
+        )
+
+    def _save_generated_lesson_with_name(self, session, teacher, lesson_name: str, language: str) -> ConversationReply:
+        lesson_name = (lesson_name or "").strip()
+        if not lesson_name:
+            log_event(logger, "validation_failure", field="lesson_name", value=lesson_name)
+            return self._reply(self._text(language, "lesson_name_invalid"), ConversationState.NEW_LESSON_NAME)
+
+        lesson_grade = (session.temp_profile_grade or "").strip() or teacher.default_grade
+        lesson_subject = (session.temp_profile_subject or "").strip() or teacher.default_subject
+
+        lesson_payload = self.lesson_payload_builder.build(
+            teacher_id=teacher.id,
+            lesson_name=lesson_name,
+            grade=lesson_grade,
+            subject=lesson_subject,
+            topic=session.temp_topic or "",
+            duration_minutes=session.temp_duration_minutes or 0,
+            lesson_text=session.temp_generated_lesson or "",
+        )
+
+        lesson = self.lesson_repo.create_or_update_by_policy(
+            teacher_id=teacher.id,
+            lesson_name=lesson_name,
+            topic=session.temp_topic or "",
+            grade=lesson_grade,
+            subject=lesson_subject,
+            duration_minutes=session.temp_duration_minutes or 0,
+            lesson_text=session.temp_generated_lesson or "",
+            lesson_payload=lesson_payload,
+        )
+        if lesson is None:
+            session.current_state = ConversationState.NEW_LESSON_NAME.value
+            self.session_repo.save(session)
+            return self._reply(self._text(language, "duplicate_lesson_name"), ConversationState.NEW_LESSON_NAME)
+
+        self.session_repo.reset_for_main_menu(session)
+        return self._main_menu_reply(self._text(language, "lesson_saved"), language)
+
     def _handle_new_lesson_name(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
         language = self._teacher_language(teacher)
@@ -871,34 +1086,7 @@ class ConversationService:
             self.session_repo.save(session)
             return self._reply(self._text(language, "new_lesson_without_profile"), ConversationState.PROFILE_NAME)
 
-        lesson_grade = (session.temp_profile_grade or "").strip() or teacher.default_grade
-        lesson_subject = (session.temp_profile_subject or "").strip() or teacher.default_subject
-
-        lesson_payload = self.lesson_payload_builder.build(
-            teacher_id=teacher.id,
-            lesson_name=text,
-            grade=lesson_grade,
-            subject=lesson_subject,
-            topic=session.temp_topic or "",
-            duration_minutes=session.temp_duration_minutes or 0,
-            lesson_text=session.temp_generated_lesson or "",
-        )
-
-        lesson = self.lesson_repo.create_or_update_by_policy(
-            teacher_id=teacher.id,
-            lesson_name=text,
-            topic=session.temp_topic or "",
-            grade=lesson_grade,
-            subject=lesson_subject,
-            duration_minutes=session.temp_duration_minutes or 0,
-            lesson_text=session.temp_generated_lesson or "",
-            lesson_payload=lesson_payload,
-        )
-        if lesson is None:
-            return self._reply(self._text(language, "duplicate_lesson_name"), ConversationState.NEW_LESSON_NAME)
-
-        self.session_repo.reset_for_main_menu(session)
-        return self._main_menu_reply(self._text(language, "lesson_saved"), language)
+        return self._save_generated_lesson_with_name(session, teacher, text, language)
 
     def _handle_retrieve_lesson_name(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)

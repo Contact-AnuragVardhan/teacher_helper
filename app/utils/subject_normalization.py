@@ -79,3 +79,28 @@ def normalize_subject(value: str | None) -> str:
 def is_canonical_subject(value: str | None) -> bool:
     key = _normalize_key(value)
     return any(key == item.casefold() for item in CANONICAL_SUBJECTS)
+
+_SUBJECT_DISPLAY_HINDI = {
+    "Mathematics": "गणित",
+    "Science": "विज्ञान",
+    "English": "अंग्रेज़ी",
+    "Hindi": "हिंदी",
+    "Social Science": "सामाजिक विज्ञान",
+}
+
+
+def subject_display_name(value: str | None, *, language: str | None = None) -> str:
+    """Return a display-friendly subject name for the selected UI/lesson language.
+
+    Storage and validation continue to use canonical English subject names.
+    Hindi lesson output should show the subject in Devanagari, so canonical
+    values like ``Social Science`` are rendered as ``सामाजिक विज्ञान``.
+    """
+    canonical = normalize_subject(value)
+    if not canonical:
+        return ""
+
+    if (language or "").strip().casefold() == "hindi":
+        return _SUBJECT_DISPLAY_HINDI.get(canonical, canonical)
+
+    return canonical

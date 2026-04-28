@@ -35,6 +35,7 @@ def generate_lesson_until_save_prompt(
 
 def save_generated_lesson(client, lesson_name: str, phone: str = PHONE):
     send(client, "1", phone)
+    send(client, "no", phone)
     return send(client, lesson_name, phone)
 
 
@@ -110,11 +111,49 @@ def test_save_lesson_flow_works(client, db_session):
 
     generate_lesson_until_save_prompt(client)
     send(client, "1")
+    send(client, "no")
     send(client, "Plants Basics")
 
     lesson = db_session.query(LessonPlan).first()
     assert lesson.lesson_name == "Plants Basics"
 
+
+def test_save_lesson_can_use_suggested_name(client, db_session):
+    create_profile_via_webhook(client)
+
+    generate_lesson_until_save_prompt(client, topic="Jhansi Ki Rani")
+    response = send(client, "1")
+    payload = response.json()
+
+    assert payload["current_state"] == "NEW_LESSON_CONFIRM_NAME"
+    assert "JhansiKiRani_" in payload["reply"]
+    assert "Jhansi_Ki_Rani_" not in payload["reply"]
+    assert payload["outbound"]["type"] == "buttons"
+
+    response = send(client, "confirm_suggested_lesson_name")
+    assert response.json()["current_state"] == "MAIN_MENU"
+
+    lesson = db_session.query(LessonPlan).first()
+    assert lesson.lesson_name.startswith("JhansiKiRani_")
+
+
+
+def test_save_lesson_suggested_name_uses_devanagari_for_hindi(client, db_session):
+    create_profile_via_webhook(client, language="Hindi")
+
+    generate_lesson_until_save_prompt(client, topic="Jhansi Ki Rani", subject="Social")
+    response = send(client, "पाठ सेव करें")
+    payload = response.json()
+
+    assert payload["current_state"] == "NEW_LESSON_CONFIRM_NAME"
+    assert "झाँसीकीरानी_" in payload["reply"]
+    assert "JhansiKiRani_" not in payload["reply"]
+
+    response = send(client, "हाँ")
+    assert response.json()["current_state"] == "MAIN_MENU"
+
+    lesson = db_session.query(LessonPlan).first()
+    assert lesson.lesson_name.startswith("झाँसीकीरानी_")
 
 def test_profile_can_be_edited_and_saved(client, db_session):
     create_profile_via_webhook(client)
@@ -249,6 +288,7 @@ def test_duplicate_lesson_name_message_has_example(client):
     create_saved_lesson(client, "Plants Basics", "Plants")
     generate_lesson_until_save_prompt(client, topic="Trees")
     send(client, "1")
+    send(client, "no")
     response = send(client, "Plants Basics")
 
     assert response.json()["reply"] == DUPLICATE_LESSON_NAME

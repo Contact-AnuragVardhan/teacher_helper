@@ -48,4 +48,26 @@ def test_lesson_flow_accepts_hindi_grade_subject_duration_and_yes_save(client, d
     assert response.json()["current_state"] == "NEW_LESSON_CONFIRM_SAVE"
 
     response = send(client, "हाँ")
-    assert response.json()["current_state"] == "NEW_LESSON_NAME"
+    assert response.json()["current_state"] == "NEW_LESSON_CONFIRM_NAME"
+    assert "सुझाया गया पाठ नाम" in response.json()["reply"]
+
+    response = send(client, "हाँ")
+    assert response.json()["current_state"] == "MAIN_MENU"
+
+
+def test_hindi_lesson_header_displays_subject_in_devanagari(client):
+    send(client, "3")
+    send(client, "Anurag")
+    send(client, "6")
+    send(client, "Social")
+    send(client, "Hindi")
+
+    send(client, "1")
+    send(client, "झाँसी की रानी")
+    send(client, "6")
+    send(client, "Social")
+    response = send(client, "45")
+
+    assert response.json()["current_state"] == "NEW_LESSON_CONFIRM_SAVE"
+    assert "विषय: सामाजिक विज्ञान" in response.json()["reply"]
+    assert "विषय: Social" not in response.json()["reply"]

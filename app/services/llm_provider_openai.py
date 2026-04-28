@@ -37,8 +37,25 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
             log_event(logger, "openai_response_empty", model=self.model)
             raise RuntimeError("LLM response was empty.")
 
-        needs_structure_retry = not self._is_response_well_structured(content, prompt)
+        structure_failures = self._response_structure_failures(content, prompt)
+        needs_structure_retry = bool(structure_failures)
         needs_quality_retry = self._looks_generic(content, prompt)
+
+        log_event(
+            logger,
+            "openai_response_validation",
+            model=self.model,
+            needs_structure_retry=needs_structure_retry,
+            structure_failures=structure_failures,
+            needs_quality_retry=needs_quality_retry,
+            preferred_language=prompt.metadata.get("preferred_language"),
+            topic=prompt.metadata.get("topic"),
+            subject=prompt.metadata.get("subject"),
+            duration_minutes=prompt.metadata.get("duration_minutes"),
+            has_ncert_match=bool(prompt.metadata.get("has_ncert_match")),
+            has_llm_source_block=self._has_ncert_source_block(content),
+            content_preview=content[:1500],
+        )
 
         if needs_structure_retry or needs_quality_retry:
             log_event(
@@ -46,6 +63,7 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
                 "openai_revision_retry",
                 model=self.model,
                 needs_structure_retry=needs_structure_retry,
+                structure_failures=structure_failures,
                 needs_quality_retry=needs_quality_retry,
             )
             timing_map = prompt.metadata.get("timing_map", {})
@@ -59,8 +77,13 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
                 f"7. Closure -> ({timing_map.get('closure', 'required')} min)"
             )
             has_ncert_match = bool(prompt.metadata.get("has_ncert_match"))
+            has_llm_source_block = self._has_ncert_source_block(content)
             language_instruction = self._revision_language_instruction(
                 str(prompt.metadata.get("preferred_language", "English"))
+            )
+            source_or_learn_more_instruction = self._revision_source_or_learn_more_instruction(
+                has_app_ncert_match=has_ncert_match,
+                has_llm_source_block=has_llm_source_block,
             )
             revised = self._create_completion(
                 messages=[
@@ -81,8 +104,7 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
                             f"Duration: {prompt.metadata.get('duration_minutes', '')} minutes\n\n"
                             "Use these section headings in order: Lesson Title, Objectives, 1. Opening, 2. Concept Teaching, "
                             "3. Guided Practice, 4. Concept Reinforcement, 5. Independent Practice, 6. Assessment / Check, 7. Closure, Teaching Tips. "
-                            "Use Learn More only when there is no NCERT match. "
-                            "Do not add Source because the app adds it separately. "
+                            "Use Learn More only when there is no Source/NCERT reference. "
                             "Keep the timing in the same heading line for sections 1 to 7. "
                             "Use this exact timing distribution:\n"
                             f"{timing_hint}\n\n"
@@ -93,11 +115,7 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
                             "Teaching Tips must be short bullet points. "
                             "No markdown tables. No long paragraphs. "
                             f"{language_instruction} "
-                            + (
-                                "Do not include Learn More or any YouTube link because NCERT was matched."
-                                if has_ncert_match
-                                else "Include Learn More with exactly one relevant YouTube link."
-                            )
+                            f"{source_or_learn_more_instruction}"
                         ),
                     },
                 ],
@@ -106,8 +124,16 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
             if revised:
                 content = revised
 
-        if not self._is_response_well_structured(content, prompt):
-            log_event(logger, "openai_response_invalid_structure", model=self.model, content_preview=content[:500])
+        final_structure_failures = self._response_structure_failures(content, prompt)
+        if final_structure_failures:
+            log_event(
+                logger,
+                "openai_response_invalid_structure",
+                model=self.model,
+                structure_failures=final_structure_failures,
+                has_llm_source_block=self._has_ncert_source_block(content),
+                content_preview=content[:2000],
+            )
             raise RuntimeError("LLM response did not include the required lesson planning structure.")
 
         log_event(logger, "openai_request_completed", model=self.model)
@@ -117,9 +143,9 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
         language = preferred_language.strip().casefold()
         if language == "hindi":
             return (
-                "Keep structural headings and metadata labels in English, but write the lesson title, "
-                "objectives, bullets, teaching tips, and teaching content in Hindi using Devanagari script only. "
-                "Do not use Roman Hindi or Hinglish."
+                "Write all visible lesson content in simple Hindi using Devanagari script only. "
+                "Use Hindi/Devanagari metadata labels and section headings when the requested response shape is Hindi. "
+                "Do not use Roman Hindi or Hinglish except inside URLs."
             )
         if language == "hinglish":
             return (
@@ -127,6 +153,18 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
                 "Do not use Devanagari."
             )
         return "Write the lesson in clear, simple English."
+
+    def _revision_source_or_learn_more_instruction(
+        self,
+        *,
+        has_app_ncert_match: bool,
+        has_llm_source_block: bool,
+    ) -> str:
+        if has_llm_source_block:
+            return "Keep the Source block from your previous answer at the very end. Do not include Learn More or any YouTube link."
+        if has_app_ncert_match:
+            return "Include a Source block at the very end using NCERT details. The app will not add Source separately. Do not include Learn More or any YouTube link."
+        return "End with exactly one final reference block: include Source if you can reliably identify the NCERT source from your own knowledge; otherwise include Learn More with exactly one relevant YouTube link."
 
     def _create_completion(self, *, messages: list[dict[str, str]], temperature: float) -> str:
         response = self.client.chat.completions.create(
@@ -138,26 +176,30 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
         return (content or "").strip()
 
     def _is_response_well_structured(self, text: str, prompt: PromptBundle) -> bool:
+        return not self._response_structure_failures(text, prompt)
+
+    def _response_structure_failures(self, text: str, prompt: PromptBundle) -> list[str]:
         normalized = text.replace("\r\n", "\n").strip()
+        failures: list[str] = []
         if not normalized:
-            return False
+            return ["empty_response"]
 
         if not self._has_top_summary_block(normalized):
-            return False
+            failures.append("missing_or_invalid_top_summary_block")
 
         if not self._has_required_sections(normalized):
-            return False
+            failures.append("missing_or_invalid_required_sections")
 
         if not self._has_required_timings(normalized):
-            return False
+            failures.append("missing_or_invalid_section_timings")
 
         if not self._has_list_like_content(normalized):
-            return False
+            failures.append("not_enough_bullets_or_numbered_lines")
 
         if not self._has_learn_more_requirement(normalized, prompt):
-            return False
+            failures.append("learn_more_requirement_failed")
 
-        return True
+        return failures
 
     def _has_top_summary_block(self, text: str) -> bool:
         english_summary_checks = [
@@ -229,7 +271,7 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
     def _has_required_timings(self, text: str) -> bool:
         timing_line_count = len(
             re.findall(
-                r"(?im)^\s*(?:[1-7]\.)?\s*[^\n()]+\(\s*\d+(?:\s*[–-]\s*\d+)?\s*min\s*\)\s*:?[ \t]*$",
+                r"(?im)^\s*(?:[1-7]\.)?\s*[^\n()]+\(\s*\d+(?:\s*[–-]\s*\d+)?\s*(?:min|mins|minutes|मिनट)\s*\)\s*:?[ \t]*$",
                 text,
             )
         )
@@ -237,7 +279,7 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
             return True
 
         standalone_timing_count = len(
-            re.findall(r"(?im)^\s*\(?\s*\d+(?:\s*[–-]\s*\d+)?\s*min\s*\)?\s*$", text)
+            re.findall(r"(?im)^\s*\(?\s*\d+(?:\s*[–-]\s*\d+)?\s*(?:min|mins|minutes|मिनट)\s*\)?\s*$", text)
         )
         return standalone_timing_count >= 5
 
@@ -247,13 +289,33 @@ class OpenAILessonGenerationProvider(LessonGenerationProvider):
         return len(bullet_lines) + len(numbered_lines) >= 8
 
     def _has_learn_more_requirement(self, text: str, prompt: PromptBundle) -> bool:
-        has_ncert_match = bool(prompt.metadata.get("has_ncert_match"))
+        has_app_ncert_match = bool(prompt.metadata.get("has_ncert_match"))
+        has_llm_source_block = self._has_ncert_source_block(text)
         has_learn_more = bool(re.search(r"(?im)^\s*(?:Learn More|और सीखें|अधिक सीखें)\s*:?[ \t]*$", text))
         has_youtube = "youtube.com" in text.casefold() or "youtu.be" in text.casefold()
 
-        if has_ncert_match:
-            return not has_youtube
+        # Source/Learn More must be part of the LLM response. The app no longer
+        # treats app-side NCERT matches as enough, because it does not append Source
+        # separately after generation.
+        if has_llm_source_block:
+            return not has_learn_more and not has_youtube
+
         return has_learn_more and has_youtube
+
+    def _has_ncert_source_block(self, text: str) -> bool:
+        lines = [line.strip() for line in text.replace("\r\n", "\n").splitlines()]
+        for index, line in enumerate(lines):
+            cleaned = re.sub(r"^(?:[-•*]+|\d+[\.)-])\s*", "", line).strip()
+            lowered = cleaned.casefold().rstrip(":").strip()
+            if lowered == "source" or lowered == "स्रोत" or cleaned.casefold().startswith("source:") or cleaned.startswith("स्रोत:"):
+                block = "\n".join(lines[index : index + 8])
+                lowered_block = block.casefold()
+                return (
+                    "ncert" in lowered_block
+                    or "एनसीईआरटी" in block
+                    or "एन.सी.ई.आर.टी" in block
+                )
+        return False
 
     def _looks_generic(self, text: str, prompt: PromptBundle) -> bool:
         normalized = text.casefold()
