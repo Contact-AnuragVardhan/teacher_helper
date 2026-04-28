@@ -10,10 +10,10 @@ from app.repositories.session_repository import SessionRepository
 from app.repositories.teacher_repository import TeacherRepository
 from app.services.lesson_generator import LessonGeneratorService
 from app.services.lesson_payload_builder import LessonPayloadBuilder
+from app.services.subject_resolver import SubjectResolver
 from app.state_machine.states import ConversationState
 from app.utils.profile_validation import validate_profile_grade, validate_profile_subject
-from app.utils.subject_normalization import normalize_subject
-from app.utils.text import clean_text, normalize_choice
+from app.utils.text import clean_text, normalize_choice, normalize_grade, parse_duration_minutes
 
 logger = get_logger(__name__)
 
@@ -269,6 +269,7 @@ class ConversationService:
         self.session_repo = SessionRepository(db)
         self.lesson_generator = LessonGeneratorService(db)
         self.lesson_payload_builder = LessonPayloadBuilder()
+        self.subject_resolver = SubjectResolver(self.settings)
 
     def handle_message(self, whatsapp_number: str, incoming_text: str) -> ConversationReply:
         session, was_reset = self.session_repo.get_or_create(whatsapp_number)
@@ -661,7 +662,7 @@ class ConversationService:
         if teacher and self._is_keep_value(text):
             grade_value = teacher.default_grade
         else:
-            grade_value = text.strip()
+            grade_value = normalize_grade(text)
             grade_error = self._localize_validation_error(validate_profile_grade(grade_value, self.settings), language)
             if grade_error:
                 log_event(logger, "validation_failure", field="default_grade", value=text)
@@ -690,7 +691,7 @@ class ConversationService:
         if teacher and self._is_keep_value(text):
             subject_value = teacher.default_subject
         else:
-            subject_value = normalize_subject(text)
+            subject_value = self.subject_resolver.resolve(text, language=language)
             subject_error = self._localize_validation_error(
                 validate_profile_subject(
                     subject_value,
@@ -764,7 +765,8 @@ class ConversationService:
         if not text:
             return self._reply(self._new_lesson_grade_prompt(language), ConversationState.NEW_LESSON_GRADE)
 
-        grade_error = self._localize_validation_error(validate_profile_grade(text, self.settings), language)
+        grade_value = normalize_grade(text)
+        grade_error = self._localize_validation_error(validate_profile_grade(grade_value, self.settings), language)
         if grade_error:
             log_event(logger, "validation_failure", field="lesson_grade", value=text)
             return self._reply(
@@ -772,7 +774,7 @@ class ConversationService:
                 ConversationState.NEW_LESSON_GRADE,
             )
 
-        session.temp_profile_grade = text.strip()
+        session.temp_profile_grade = grade_value
         session.current_state = ConversationState.NEW_LESSON_SUBJECT.value
         self.session_repo.save(session)
         return self._reply(self._new_lesson_subject_prompt(language), ConversationState.NEW_LESSON_SUBJECT)
@@ -784,7 +786,7 @@ class ConversationService:
             return self._reply(self._new_lesson_subject_prompt(language), ConversationState.NEW_LESSON_SUBJECT)
 
         lesson_grade = session.temp_profile_grade or ""
-        normalized_subject = normalize_subject(text)
+        normalized_subject = self.subject_resolver.resolve(text, language=language)
         subject_error = self._localize_validation_error(validate_profile_subject(normalized_subject, lesson_grade, self.settings), language)
         if subject_error:
             log_event(logger, "validation_failure", field="lesson_subject", value=text)
@@ -801,11 +803,8 @@ class ConversationService:
     def _handle_new_lesson_duration(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
         language = self._teacher_language(teacher)
-        try:
-            duration = int(text)
-            if duration <= 0:
-                raise ValueError
-        except (TypeError, ValueError):
+        duration = parse_duration_minutes(text)
+        if duration is None:
             log_event(logger, "validation_failure", field="duration_minutes", value=text)
             return self._reply(self._text(language, "invalid_duration"), ConversationState.NEW_LESSON_DURATION)
 
@@ -836,12 +835,12 @@ class ConversationService:
         language = self._teacher_language(teacher)
         choice = normalize_choice(text)
 
-        if choice in {"1", "save lesson", "save_lesson", "पाठ सेव करें"}:
+        if choice in {"1", "yes", "save lesson", "save_lesson", "पाठ सेव करें"}:
             session.current_state = ConversationState.NEW_LESSON_NAME.value
             self.session_repo.save(session)
             return self._reply(self._text(language, "lesson_name_prompt"), ConversationState.NEW_LESSON_NAME)
 
-        if choice in {"2", "cancel", "cancel_lesson", "रद्द करें", "radd"}:
+        if choice in {"2", "no", "cancel", "cancel_lesson", "रद्द करें", "radd"}:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "lesson_cancelled"), language)
 

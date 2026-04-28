@@ -7,8 +7,9 @@ from app.core.logging import get_logger, log_event
 from app.db.session import get_db
 from app.repositories.teacher_repository import TeacherRepository
 from app.schemas.teacher import TeacherResponse, TeacherUpsertRequest
+from app.services.subject_resolver import SubjectResolver
 from app.utils.profile_validation import validate_profile_grade, validate_profile_subject
-from app.utils.subject_normalization import normalize_subject
+from app.utils.text import normalize_grade
 
 router = APIRouter(prefix="/teacher", tags=["teacher"])
 logger = get_logger(__name__)
@@ -57,15 +58,16 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
             detail=f"preferred_language must be one of: {', '.join(settings.supported_languages_list)}.",
         )
 
-    grade_error = validate_profile_grade(payload.default_grade, settings)
+    normalized_grade = normalize_grade(payload.default_grade)
+    grade_error = validate_profile_grade(normalized_grade, settings)
     if grade_error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=grade_error)
 
-    normalized_subject = normalize_subject(payload.default_subject)
+    normalized_subject = SubjectResolver(settings).resolve(payload.default_subject, language=preferred_language)
 
     subject_error = validate_profile_subject(
         normalized_subject,
-        payload.default_grade,
+        normalized_grade,
         settings,
     )
     if subject_error:
@@ -74,7 +76,7 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
     teacher = TeacherRepository(db).upsert(
         whatsapp_number=payload.whatsapp_number,
         teacher_name=payload.teacher_name.strip(),
-        default_grade=payload.default_grade.strip(),
+        default_grade=normalized_grade,
         default_subject=normalized_subject,
         preferred_language=preferred_language,
     )

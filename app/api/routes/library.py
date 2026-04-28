@@ -3,7 +3,7 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,9 @@ from app.core.logging import get_logger, log_event
 from app.db.session import get_db
 from app.models.lesson_plan import LessonPlan
 from app.models.teacher_profile import TeacherProfile
+from app.services.subject_resolver import SubjectResolver
 from app.utils.subject_normalization import normalize_subject
+from app.utils.text import normalize_grade, parse_duration_minutes
 
 router = APIRouter(prefix="/api/library", tags=["library"])
 logger = get_logger(__name__)
@@ -25,6 +27,14 @@ class SaveLibraryLessonRequest(BaseModel):
     subject: str
     topic: str
     duration_minutes: int
+
+    @field_validator("duration_minutes", mode="before")
+    @classmethod
+    def parse_duration(cls, value):
+        minutes = parse_duration_minutes(value)
+        if minutes is None:
+            raise ValueError("duration_minutes must be greater than 0.")
+        return minutes
     source_type: str | None = None
     source_reference: dict[str, Any] | None = None
     lesson_json: dict[str, Any]
@@ -214,16 +224,17 @@ def save_library_lesson(payload: SaveLibraryLessonRequest, db: Session = Depends
         )
 
     teacher = _get_teacher_or_404(db, payload.teacher_id)
-    normalized_subject = normalize_subject(payload.subject)
+    settings = get_settings()
+    normalized_grade = normalize_grade(payload.grade)
+    normalized_subject = SubjectResolver(settings).resolve(payload.subject, language=teacher.preferred_language)
     source_reference = _build_source_reference(
-        payload.grade,
+        normalized_grade,
         normalized_subject,
         payload.topic,
         payload.source_reference,
     )
     lesson_text = _build_lesson_text(payload.lesson_json)
 
-    settings = get_settings()
     existing = (
         db.query(LessonPlan)
         .filter(
@@ -242,7 +253,7 @@ def save_library_lesson(payload: SaveLibraryLessonRequest, db: Session = Depends
     lesson = existing or LessonPlan(teacher_id=teacher.id)
     lesson.lesson_name = payload.lesson_name.strip()
     lesson.topic = payload.topic.strip()
-    lesson.grade = payload.grade.strip()
+    lesson.grade = normalized_grade
     lesson.subject = normalized_subject
     lesson.duration_minutes = payload.duration_minutes
     lesson.lesson_text = lesson_text
