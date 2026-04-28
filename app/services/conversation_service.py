@@ -39,6 +39,10 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_new_lesson": "नया पाठ",
         "btn_all_lessons": "सभी पाठ",
         "btn_profile": "प्रोफ़ाइल",
+        "btn_main_menu": "मुख्य मेनू",
+        "all_lessons_body_page": "खोलने के लिए पाठ चुनें। पेज {page}/{total_pages}",
+        "all_lessons_next": "अगला पेज",
+        "all_lessons_previous": "पिछला पेज",
         "new_lesson_without_profile": "कृपया पहले अपनी प्रोफ़ाइल पूरी करें।\nआपका नाम क्या है?",
         "new_lesson_topic_prompt": "आप किस विषय पर पाठ पढ़ाना चाहते हैं? उदाहरण: \"झाँसी की रानी\"",
         "new_lesson_topic_invalid": "कृपया पाठ का विषय लिखें, उदाहरण: \"झाँसी की रानी\"।",
@@ -121,6 +125,10 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_new_lesson": "New Lesson",
         "btn_all_lessons": "All Lessons",
         "btn_profile": "My Profile",
+        "btn_main_menu": "Back to Main Menu",
+        "all_lessons_body_page": "Choose a lesson to open. Page {page}/{total_pages}.",
+        "all_lessons_next": "Next Page",
+        "all_lessons_previous": "Previous Page",
         "new_lesson_without_profile": "Please complete your profile first.\nWhat is your name?",
         "new_lesson_topic_prompt": "What lesson topic would you like to teach? Example: \"Jhansi Ki Rani\"",
         "new_lesson_topic_invalid": "Please enter a lesson topic, for example \"Jhansi Ki Rani\".",
@@ -203,6 +211,10 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_new_lesson": "Naya Lesson",
         "btn_all_lessons": "All Lessons",
         "btn_profile": "Profile",
+        "btn_main_menu": "Main Menu",
+        "all_lessons_body_page": "Open karne ke liye lesson choose karein. Page {page}/{total_pages}.",
+        "all_lessons_next": "Next Page",
+        "all_lessons_previous": "Previous Page",
         "new_lesson_without_profile": "Please pehle apni profile complete karein.\nAapka naam kya hai?",
         "new_lesson_topic_prompt": "Aap kis topic par lesson banana chahte hain? Example: \"Jhansi Ki Rani\"",
         "new_lesson_topic_invalid": "Please lesson topic likhein, example: \"Jhansi Ki Rani\".",
@@ -298,6 +310,13 @@ class ConversationService:
         state = ConversationState(session.current_state)
         text = clean_text(incoming_text)
         log_event(logger, "conversation_inbound", whatsapp_number=whatsapp_number, state=state.value, body=text)
+
+        choice = normalize_choice(text)
+        if state != ConversationState.MAIN_MENU and self._is_main_menu_choice(choice):
+            teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+            language = self._teacher_language(teacher)
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply(self._text(language, "back_main"), language)
 
         handler_map = {
             ConversationState.MAIN_MENU: self._handle_main_menu,
@@ -427,6 +446,27 @@ class ConversationService:
     def _is_keep_value(self, text: str) -> bool:
         return normalize_choice(text) in {"same", "skip", "keep", "current"}
 
+    def _is_main_menu_choice(self, choice: str) -> bool:
+        return choice in {
+            "menu_main_menu",
+            "main menu",
+            "back to main menu",
+            "menu",
+            "home",
+            "मुख्य मेनू",
+            "मेनू",
+            "होम",
+        }
+
+    def _main_menu_button(self, language: str) -> dict[str, str]:
+        return {"id": "menu_main_menu", "title": self._text(language, "btn_main_menu")}
+
+    def _main_menu_row(self, language: str) -> dict[str, str]:
+        return {"id": "menu_main_menu", "title": self._text(language, "btn_main_menu")}
+
+    def _lesson_page_row(self, page: int, title: str) -> dict[str, str]:
+        return {"id": f"lesson_page:{page}", "title": title[:24]}
+
     def _new_lesson_grade_prompt(self, language: str) -> str:
         return self._text(language, "new_lesson_grade_prompt")
 
@@ -499,6 +539,7 @@ class ConversationService:
                 "buttons": [
                     {"id": "save_lesson", "title": self._text(language, "btn_save")},
                     {"id": "cancel_lesson", "title": self._text(language, "btn_cancel")},
+                    self._main_menu_button(language),
                 ],
             },
         )
@@ -625,13 +666,29 @@ class ConversationService:
                 "buttons": [
                     {"id": "confirm_suggested_lesson_name", "title": self._text(language, "btn_yes")},
                     {"id": "enter_custom_lesson_name", "title": self._text(language, "btn_no")},
+                    self._main_menu_button(language),
                 ],
             },
         )
 
-    def _all_lessons_interactive_reply(self, lesson_summaries: list[tuple[int, str]], language: str) -> ConversationReply:
+    def _all_lessons_interactive_reply(
+        self,
+        lesson_summaries: list[tuple[int, str]],
+        language: str,
+        page: int = 0,
+    ) -> ConversationReply:
+        # WhatsApp list messages support up to 10 rows. Keep the same WhatsApp
+        # list-style menu for larger lesson libraries by paginating the list and
+        # reserving rows for navigation plus Back to Main Menu.
+        page_size = 7
+        total_lessons = len(lesson_summaries)
+        total_pages = max(1, (total_lessons + page_size - 1) // page_size)
+        page = max(0, min(page, total_pages - 1))
+        start_index = page * page_size
+        page_lessons = lesson_summaries[start_index : start_index + page_size]
+
         rows = []
-        for lesson_id, title in lesson_summaries:
+        for lesson_id, title in page_lessons:
             item = {
                 "id": f"lesson_id:{lesson_id}",
                 "title": title[:24],
@@ -640,13 +697,24 @@ class ConversationService:
                 item["description"] = title[:72]
             rows.append(item)
 
+        if page > 0:
+            rows.append(self._lesson_page_row(page - 1, self._text(language, "all_lessons_previous")))
+        if page < total_pages - 1:
+            rows.append(self._lesson_page_row(page + 1, self._text(language, "all_lessons_next")))
+        rows.append(self._main_menu_row(language))
+
         return self._reply(
             self._text(language, "all_lessons_reply"),
             ConversationState.RETRIEVE_LESSON_NAME,
             outbound={
                 "type": "list",
                 "header": self._text(language, "all_lessons_header"),
-                "body": self._text(language, "all_lessons_body"),
+                "body": self._text(
+                    language,
+                    "all_lessons_body_page",
+                    page=page + 1,
+                    total_pages=total_pages,
+                ),
                 "button_text": self._text(language, "all_lessons_button"),
                 "section_title": self._text(language, "all_lessons_section"),
                 "footer": self._text(language, "all_lessons_footer"),
@@ -655,6 +723,8 @@ class ConversationService:
         )
 
     def _all_lessons_fallback_reply(self, titles: list[str], language: str) -> ConversationReply:
+        # Kept only for backward compatibility; All Lessons now uses WhatsApp
+        # list-style outbound options even when there are more than 10 lessons.
         reply_text = self._text(
             language,
             "all_lessons_fallback",
@@ -662,7 +732,7 @@ class ConversationService:
         )
         return self._reply(reply_text, ConversationState.RETRIEVE_LESSON_NAME)
 
-    def _show_accessible_lessons(self, session, teacher_id: int, language: str) -> ConversationReply:
+    def _show_accessible_lessons(self, session, teacher_id: int, language: str, page: int = 0) -> ConversationReply:
         lesson_summaries = self._localize_lesson_summaries(
             self.lesson_repo.list_accessible_summaries_for_teacher(teacher_id),
             language,
@@ -675,13 +745,11 @@ class ConversationService:
         session.temp_selected_lesson_id = None
         self.session_repo.save(session)
 
-        if len(lesson_summaries) <= 10:
-            return self._all_lessons_interactive_reply(
-                [(item.lesson_id, item.display_title) for item in lesson_summaries],
-                language,
-            )
-
-        return self._all_lessons_fallback_reply([item.display_title for item in lesson_summaries], language)
+        return self._all_lessons_interactive_reply(
+            [(item.lesson_id, item.display_title) for item in lesson_summaries],
+            language,
+            page=page,
+        )
 
     def _lesson_action_reply(
         self,
@@ -709,7 +777,7 @@ class ConversationService:
                 "body": self._text(language, "shared_lesson_body"),
                 "footer": self._text(language, "main_footer"),
                 "buttons": [
-                    {"id": "lesson_action_back", "title": self._text(language, "btn_back")},
+                    self._main_menu_button(language),
                 ],
             }
         else:
@@ -721,7 +789,7 @@ class ConversationService:
                 "buttons": [
                     {"id": "lesson_action_share", "title": self._text(language, "btn_share")},
                     {"id": "lesson_action_delete", "title": self._text(language, "btn_delete")},
-                    {"id": "lesson_action_back", "title": self._text(language, "btn_back")},
+                    self._main_menu_button(language),
                 ],
             }
 
@@ -749,6 +817,7 @@ class ConversationService:
                 "buttons": [
                     {"id": "confirm_delete_lesson", "title": self._text(language, "btn_confirm_delete")},
                     {"id": "cancel_delete_lesson", "title": self._text(language, "btn_cancel")},
+                    self._main_menu_button(language),
                 ],
             },
         )
@@ -1023,6 +1092,7 @@ class ConversationService:
                 "buttons": [
                     {"id": "save_lesson", "title": self._text(language, "btn_save")},
                     {"id": "cancel_lesson", "title": self._text(language, "btn_cancel")},
+                    self._main_menu_button(language),
                 ],
             },
         )
@@ -1115,7 +1185,7 @@ class ConversationService:
         language = self._teacher_language(teacher)
         choice = normalize_choice(text)
 
-        if choice in {"0", "menu", "main menu", "back", "वापस"}:
+        if choice in {"0", "back", "वापस"} or self._is_main_menu_choice(choice):
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "back_main"), language)
 
@@ -1130,6 +1200,11 @@ class ConversationService:
         if not lesson_summaries:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "all_lessons_empty"), language)
+
+        if choice.startswith("lesson_page:"):
+            raw_page = choice.split(":", 1)[1].strip()
+            page = int(raw_page) if raw_page.isdigit() else 0
+            return self._show_accessible_lessons(session, teacher.id, language, page=page)
 
         selected_summary = None
 
