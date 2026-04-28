@@ -14,7 +14,7 @@ class TeacherProfile(Base):
     teacher_name: Mapped[str] = mapped_column(String(255), nullable=False)
     default_grade: Mapped[str] = mapped_column(String(100), nullable=False)
     default_subject: Mapped[str] = mapped_column(String(100), nullable=False)
-    preferred_language: Mapped[str] = mapped_column(String(50), nullable=False, default="English")
+    preferred_language: Mapped[str] = mapped_column(String(50), nullable=False, default="Hindi")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

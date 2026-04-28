@@ -70,7 +70,7 @@ DATABASE_URL="sqlite:///./teacher_helper.db"
 LLM_PROVIDER="deterministic"
 DUPLICATE_LESSON_POLICY="reject"
 SESSION_TIMEOUT_MINUTES="30"
-SUPPORTED_LANGUAGES="English,Hinglish"
+SUPPORTED_LANGUAGES="Hindi,English,Hinglish"
 RESET_DB_ON_START=false
 ```
 
@@ -83,7 +83,7 @@ OPENAI_API_KEY="your_api_key"
 OPENAI_MODEL="gpt-4o-mini"
 DUPLICATE_LESSON_POLICY="overwrite"
 SESSION_TIMEOUT_MINUTES="45"
-SUPPORTED_LANGUAGES="English,Hinglish"
+SUPPORTED_LANGUAGES="Hindi,English,Hinglish"
 RESET_DB_ON_START=false
 ```
 
@@ -189,7 +189,7 @@ curl -X POST http://127.0.0.1:8000/lesson/generate \
 
 ## Behavioral notes
 
-- The application supports English and can be configured for Hinglish when enabled in `SUPPORTED_LANGUAGES`.
+- The application supports Hindi by default and can be configured for English or Hinglish when enabled in `SUPPORTED_LANGUAGES`.
 - **All Lessons** is the current menu path for retrieving saved lessons.
 - If `LLM_PROVIDER=openai` but no API key is configured, the app can still work through deterministic generation.
 - If the LLM call fails, generation falls back to the deterministic provider automatically.

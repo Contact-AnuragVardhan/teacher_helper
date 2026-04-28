@@ -29,7 +29,7 @@ services:
       - key: SESSION_TIMEOUT_MINUTES
         value: "30"
       - key: SUPPORTED_LANGUAGES
-        value: "English"
+        value: "Hindi,English,Hinglish"
       - key: LOG_LEVEL
         value: "INFO"
       - key: ALLOW_ORIGINS

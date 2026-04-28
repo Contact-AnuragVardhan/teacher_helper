@@ -64,13 +64,19 @@ class LessonGeneratorService:
             grade=effective_grade,
             subject=effective_subject,
         )
-        retrieved_chunks = self.retrieval_service.retrieve(
+        # Client requirement: do not send stored NCERT chunks to the LLM.
+        # The prompt now asks the LLM to identify an NCERT reference from its own knowledge if possible.
+        retrieved_chunks = []
+        snippet_texts = []
+        inspectable_rows = []
+        log_event(
+            logger,
+            "lesson_generation_ncert_context_skipped",
+            topic=topic,
             grade=effective_grade,
             subject=effective_subject,
-            topic=topic,
+            reason="ncert_data_not_sent_to_llm",
         )
-        snippet_texts = [item.as_prompt_snippet() for item in retrieved_chunks]
-        inspectable_rows = [item.as_inspectable_row() for item in retrieved_chunks]
 
         log_event(
             logger,
@@ -165,6 +171,7 @@ class LessonGeneratorService:
         raw_text = re.sub(r"\n{3,}", "\n\n", raw_text)
         raw_text = re.sub(r"\n+Matched syllabus row\s*\d*:.*$", "", raw_text, flags=re.IGNORECASE | re.DOTALL)
 
+        llm_source_block = self._extract_llm_source_block(raw_text)
         parsed_sections = self._parse_sections(raw_text)
         normalized_text = self._render_normalized_lesson(
             sections=parsed_sections,
@@ -173,13 +180,12 @@ class LessonGeneratorService:
             subject=subject,
             duration_minutes=duration_minutes,
             preferred_language=preferred_language,
-            has_ncert_match=bool(rows),
+            has_ncert_match=bool(llm_source_block),
             raw_text=raw_text,
         )
 
-        source_block = self._build_source_block(rows)
-        if source_block:
-            normalized_text = f"{normalized_text}\n\n{source_block}".strip()
+        if llm_source_block:
+            normalized_text = f"{normalized_text}\n\n{llm_source_block}".strip()
 
         return re.sub(r"\n{3,}", "\n\n", normalized_text).strip()
 
@@ -834,6 +840,50 @@ class LessonGeneratorService:
                 value,
             )
         return value
+
+    def _extract_llm_source_block(self, text: str) -> str:
+        lines = [line.rstrip() for line in text.splitlines()]
+        start_index: int | None = None
+
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            lowered = stripped.casefold().rstrip(":")
+            if lowered in {"source", "स्रोत"} or lowered.startswith("source:") or lowered.startswith("स्रोत:"):
+                start_index = index
+                break
+
+        if start_index is None:
+            return ""
+
+        source_lines: list[str] = []
+        for line in lines[start_index : start_index + 8]:
+            stripped = line.strip()
+            if not stripped:
+                if source_lines:
+                    break
+                continue
+
+            lowered = stripped.casefold()
+            if source_lines and self._extract_section_key(stripped) not in {None, "source"}:
+                break
+            if lowered in {"or", "या"} or lowered.startswith(("learn more", "और सीखें", "अधिक सीखें")):
+                break
+            if "<" in stripped and ">" in stripped:
+                continue
+
+            cleaned = self._strip_list_marker(stripped).strip()
+            if cleaned:
+                source_lines.append(cleaned)
+
+        block = "\n".join(source_lines).strip()
+        if not block:
+            return ""
+
+        lowered_block = block.casefold()
+        if "ncert" not in lowered_block and "एनसीईआरटी" not in block and "एन.सी.ई.आर.टी" not in block:
+            return ""
+
+        return block
 
     def _build_source_block(self, rows: list[dict]) -> str:
         if not rows:

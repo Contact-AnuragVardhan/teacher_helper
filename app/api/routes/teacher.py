@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
+from app.core.language import normalize_language
 from app.core.logging import get_logger, log_event
 from app.db.session import get_db
 from app.repositories.teacher_repository import TeacherRepository
@@ -26,6 +27,9 @@ def get_teacher(whatsapp_number: str, db: Session = Depends(get_db)) -> TeacherR
 
 @router.post("", response_model=TeacherResponse)
 def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db)) -> TeacherResponse:
+    settings = get_settings()
+    preferred_language = normalize_language(payload.preferred_language, default=None)
+
     log_event(
         logger,
         "teacher_upsert_requested",
@@ -33,9 +37,10 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
         default_grade=payload.default_grade,
         default_subject=payload.default_subject,
         preferred_language=payload.preferred_language,
+        normalized_language=preferred_language,
     )
-    settings = get_settings()
-    if payload.preferred_language.strip().casefold() not in settings.supported_languages_casefold:
+
+    if not preferred_language or preferred_language.casefold() not in settings.supported_languages_casefold:
         log_event(
             logger,
             "teacher_upsert_invalid_language",
@@ -66,7 +71,7 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
         teacher_name=payload.teacher_name.strip(),
         default_grade=payload.default_grade.strip(),
         default_subject=normalized_subject,
-        preferred_language=payload.preferred_language.strip(),
+        preferred_language=preferred_language,
     )
     log_event(logger, "teacher_upsert_completed", whatsapp_number=payload.whatsapp_number, teacher_id=teacher.id)
     return teacher
