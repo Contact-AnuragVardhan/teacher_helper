@@ -25,9 +25,17 @@ def get_teacher(whatsapp_number: str, db: Session = Depends(get_db)) -> TeacherR
         log_event(logger, "teacher_fetch_not_found", whatsapp_number=whatsapp_number)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher not found.")
 
-    api_language_result = PreferredLanguageApiService(get_settings()).fetch_preferred_language(whatsapp_number)
-    if api_language_result and teacher.preferred_language.casefold() != api_language_result.preferred_language.casefold():
-        teacher = teacher_repo.update_preferred_language(whatsapp_number, api_language_result.preferred_language) or teacher
+    try:
+        api_language_result = PreferredLanguageApiService(get_settings()).fetch_preferred_language(whatsapp_number)
+        if api_language_result and teacher.preferred_language.casefold() != api_language_result.preferred_language.casefold():
+            teacher = teacher_repo.update_preferred_language(whatsapp_number, api_language_result.preferred_language) or teacher
+    except Exception as exc:  # pragma: no cover - defensive; local teacher fetch must continue.
+        log_event(
+            logger,
+            "preferred_language_api_fetch_ignored",
+            whatsapp_number=whatsapp_number,
+            error=str(exc),
+        )
 
     log_event(logger, "teacher_fetch_completed", whatsapp_number=whatsapp_number, teacher_id=teacher.id)
     return teacher
@@ -43,9 +51,7 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
         else settings.default_language
     )
 
-    api_language_result = PreferredLanguageApiService(settings).fetch_preferred_language(payload.whatsapp_number)
-    if api_language_result:
-        preferred_language = api_language_result.preferred_language
+    preferred_language_api = PreferredLanguageApiService(settings)
 
     log_event(
         logger,
@@ -84,6 +90,9 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
     if subject_error:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=subject_error)
 
+    # The /teacher upsert request is an explicit profile create/edit. Save the
+    # requested language locally first, then update Jalta Sitara Hotline if needed.
+    # Hotline sync is best-effort and must never block local profile create/update.
     teacher = TeacherRepository(db).upsert(
         whatsapp_number=payload.whatsapp_number,
         teacher_name=payload.teacher_name.strip(),
@@ -91,5 +100,18 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
         default_subject=normalized_subject,
         preferred_language=preferred_language,
     )
+    try:
+        preferred_language_api.sync_preferred_language_if_needed(
+            phone_number=payload.whatsapp_number,
+            selected_language=preferred_language,
+        )
+    except Exception as exc:  # pragma: no cover - defensive; local upsert already succeeded.
+        log_event(
+            logger,
+            "preferred_language_sync_ignored",
+            whatsapp_number=payload.whatsapp_number,
+            preferred_language=preferred_language,
+            error=str(exc),
+        )
     log_event(logger, "teacher_upsert_completed", whatsapp_number=payload.whatsapp_number, teacher_id=teacher.id)
     return teacher

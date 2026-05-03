@@ -396,7 +396,7 @@ class ConversationService:
             resolved_language = default_language
 
         # Keep the local profile/default-language resolution above, then ask the
-        # Student Helper API for the latest saved preference. If it differs from
+        # Jalta Sitara Hotline API for the latest saved preference. If it differs from
         # the Teacher Helper profile, sync the profile so future requests use it.
         api_language = self._preferred_language_from_api(whatsapp_number or getattr(teacher, "whatsapp_number", ""))
         if api_language:
@@ -410,8 +410,17 @@ class ConversationService:
         return resolved_language
 
     def _preferred_language_from_api(self, whatsapp_number: str | None) -> str | None:
-        result = self.preferred_language_api.fetch_preferred_language(whatsapp_number or "")
-        return result.preferred_language if result else None
+        try:
+            result = self.preferred_language_api.fetch_preferred_language(whatsapp_number or "")
+            return result.preferred_language if result else None
+        except Exception as exc:  # pragma: no cover - defensive; Hotline must not break conversation flow.
+            log_event(
+                logger,
+                "preferred_language_api_fetch_ignored",
+                whatsapp_number=whatsapp_number or "",
+                error=str(exc),
+            )
+            return None
 
     def _language_options_text(self) -> str:
         languages = self.settings.supported_languages_list or [DEFAULT_LANGUAGE]
@@ -967,21 +976,9 @@ class ConversationService:
 
         session.temp_profile_subject = subject_value
 
-        api_language = self._preferred_language_from_api(whatsapp_number)
-        if api_language:
-            self.teacher_repo.upsert(
-                whatsapp_number=whatsapp_number,
-                teacher_name=session.temp_profile_name or "",
-                default_grade=session.temp_profile_grade or "",
-                default_subject=session.temp_profile_subject or "",
-                preferred_language=api_language,
-            )
-            self.session_repo.reset_for_main_menu(session)
-            return self._main_menu_reply(self._text(api_language, "profile_saved"), api_language)
-
-        # Language question is intentionally kept in the code for fallback/local
-        # testing, but the normal production flow saves the language received
-        # from the Jalta Sitara Hotline API above instead of asking the teacher again.
+        # Always ask for the preferred language while creating/updating a profile.
+        # After the teacher answers, _handle_profile_language saves it locally and
+        # syncs the same value back to Jalta Sitara Hotline when needed.
         session.current_state = ConversationState.PROFILE_LANGUAGE.value
         self.session_repo.save(session)
 
@@ -1010,6 +1007,8 @@ class ConversationService:
                 )
             language_value = normalized_language
 
+        # Teacher Helper is the source of truth for a profile edit/create action.
+        # Save locally first. Hotline sync is best-effort and must never block the profile flow.
         self.teacher_repo.upsert(
             whatsapp_number=whatsapp_number,
             teacher_name=session.temp_profile_name or "",
@@ -1017,6 +1016,19 @@ class ConversationService:
             default_subject=session.temp_profile_subject or "",
             preferred_language=language_value,
         )
+        try:
+            self.preferred_language_api.sync_preferred_language_if_needed(
+                phone_number=whatsapp_number,
+                selected_language=language_value,
+            )
+        except Exception as exc:  # pragma: no cover - defensive; profile save already succeeded.
+            log_event(
+                logger,
+                "preferred_language_sync_ignored",
+                whatsapp_number=whatsapp_number,
+                preferred_language=language_value,
+                error=str(exc),
+            )
         self.session_repo.reset_for_main_menu(session)
         return self._main_menu_reply(self._text(language_value, "profile_saved"), language_value)
 

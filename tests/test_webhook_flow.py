@@ -376,7 +376,7 @@ def _mock_language_response(language: str = "Hindi"):
     return Response()
 
 
-def test_profile_creation_saves_language_from_jalta_sitara_hotline_api(client, db_session, monkeypatch):
+def test_profile_creation_asks_language_then_updates_jalta_sitara_hotline_api(client, db_session, monkeypatch):
     from unittest.mock import Mock
 
     from app.core.config import get_settings
@@ -387,20 +387,36 @@ def test_profile_creation_saves_language_from_jalta_sitara_hotline_api(client, d
     get_settings.cache_clear()
 
     mock_get = Mock(return_value=_mock_language_response("Hindi"))
+    mock_post = Mock(return_value=_mock_language_response("English"))
+    mock_put = Mock(return_value=_mock_language_response("English"))
     monkeypatch.setattr(preferred_language_api_service.httpx, "get", mock_get)
+    monkeypatch.setattr(preferred_language_api_service.httpx, "post", mock_post)
+    monkeypatch.setattr(preferred_language_api_service.httpx, "put", mock_put)
 
     send(client, "3")
     send(client, "Anurag")
     send(client, "5")
-    response = send(client, "English")
+    language_prompt = send(client, "English")
 
+    assert language_prompt.json()["current_state"] == "PROFILE_LANGUAGE"
+    assert "भाषा" in language_prompt.json()["reply"] or "language" in language_prompt.json()["reply"].casefold()
+
+    response = send(client, "English")
     payload = response.json()
     assert payload["current_state"] == "MAIN_MENU"
-    assert "प्रोफ़ाइल सेव हो गई" in payload["reply"]
+    assert "profile has been saved" in payload["reply"].casefold()
 
     teacher = db_session.query(TeacherProfile).first()
-    assert teacher.preferred_language == "Hindi"
+    assert teacher.preferred_language == "English"
     assert teacher.default_subject == "English"
+
+    mock_get.assert_called()
+    mock_post.assert_called()
+    assert mock_post.call_args.kwargs["json"] == {
+        "phone_number": "+15550001111",
+        "preferred_language": "English",
+    }
+    mock_put.assert_not_called()
 
 
 def test_existing_profile_language_syncs_from_jalta_sitara_hotline_api(client, db_session, monkeypatch):
@@ -424,3 +440,41 @@ def test_existing_profile_language_syncs_from_jalta_sitara_hotline_api(client, d
 
     db_session.refresh(teacher)
     assert teacher.preferred_language == "Hindi"
+
+
+def test_profile_update_language_updates_jalta_sitara_hotline_when_different(client, db_session, monkeypatch):
+    from unittest.mock import Mock
+
+    from app.core.config import get_settings
+    from app.services import preferred_language_api_service
+
+    create_profile_via_webhook(client, language="English")
+
+    monkeypatch.setenv("JALTA_SITARA_HOTLINE_LANGUAGE_API_ENABLED", "true")
+    get_settings.cache_clear()
+
+    mock_get = Mock(return_value=_mock_language_response("Hindi"))
+    mock_post = Mock(return_value=_mock_language_response("English"))
+    mock_put = Mock(return_value=_mock_language_response("English"))
+    monkeypatch.setattr(preferred_language_api_service.httpx, "get", mock_get)
+    monkeypatch.setattr(preferred_language_api_service.httpx, "post", mock_post)
+    monkeypatch.setattr(preferred_language_api_service.httpx, "put", mock_put)
+
+    send(client, "3")
+    send(client, "same")
+    send(client, "same")
+    language_prompt = send(client, "same")
+    assert language_prompt.json()["current_state"] == "PROFILE_LANGUAGE"
+
+    response = send(client, "English")
+    assert response.json()["current_state"] == "MAIN_MENU"
+
+    teacher = db_session.query(TeacherProfile).first()
+    db_session.refresh(teacher)
+    assert teacher.preferred_language == "English"
+    mock_post.assert_called()
+    assert mock_post.call_args.kwargs["json"] == {
+        "phone_number": "+15550001111",
+        "preferred_language": "English",
+    }
+    mock_put.assert_not_called()
