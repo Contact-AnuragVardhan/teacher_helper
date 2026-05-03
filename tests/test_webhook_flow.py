@@ -175,6 +175,26 @@ def test_profile_can_be_edited_and_saved(client, db_session):
     assert teacher.preferred_language == "Hinglish"
 
 
+def test_hindi_profile_edit_accepts_hindi_same_words(client, db_session):
+    create_profile_via_webhook(client, language="Hindi")
+
+    response = send(client, "3")
+    assert "वर्तमान प्रोफ़ाइल" in response.json()["reply"]
+
+    send(client, "सेम")
+    send(client, "समान")
+    send(client, "सेम")
+    response = send(client, "समान")
+
+    assert response.json()["current_state"] == "MAIN_MENU"
+
+    teacher = db_session.query(TeacherProfile).first()
+    assert teacher.teacher_name == "Anurag"
+    assert teacher.default_grade == "5"
+    assert teacher.default_subject == "English"
+    assert teacher.preferred_language == "Hindi"
+
+
 def test_hinglish_profile_generates_hinglish_lesson(client):
     create_profile_via_webhook(client, language="Hinglish")
 
@@ -336,3 +356,71 @@ def test_owner_can_delete_lesson_from_action_menu(client):
 
     lessons_after_delete = send(client, "2").json()
     assert "do not have any saved or shared lessons yet" in lessons_after_delete["reply"]
+
+
+def _mock_language_response(language: str = "Hindi"):
+    class Response:
+        status_code = 200
+
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "phone_number": "15550001111",
+                "preferred_language": language,
+                "source": "saved",
+                "supported_languages": ["Hindi", "English", "Hinglish"],
+            }
+
+    return Response()
+
+
+def test_profile_creation_saves_language_from_jalta_sitara_hotline_api(client, db_session, monkeypatch):
+    from unittest.mock import Mock
+
+    from app.core.config import get_settings
+    from app.services import preferred_language_api_service
+
+    monkeypatch.setenv("JALTA_SITARA_HOTLINE_LANGUAGE_API_ENABLED", "true")
+    monkeypatch.setenv("JALTA_SITARA_HOTLINE_BASE_URL", "https://student-helper-reai.onrender.com")
+    get_settings.cache_clear()
+
+    mock_get = Mock(return_value=_mock_language_response("Hindi"))
+    monkeypatch.setattr(preferred_language_api_service.httpx, "get", mock_get)
+
+    send(client, "3")
+    send(client, "Anurag")
+    send(client, "5")
+    response = send(client, "English")
+
+    payload = response.json()
+    assert payload["current_state"] == "MAIN_MENU"
+    assert "प्रोफ़ाइल सेव हो गई" in payload["reply"]
+
+    teacher = db_session.query(TeacherProfile).first()
+    assert teacher.preferred_language == "Hindi"
+    assert teacher.default_subject == "English"
+
+
+def test_existing_profile_language_syncs_from_jalta_sitara_hotline_api(client, db_session, monkeypatch):
+    from unittest.mock import Mock
+
+    from app.core.config import get_settings
+    from app.services import preferred_language_api_service
+
+    create_profile_via_webhook(client, language="English")
+    teacher = db_session.query(TeacherProfile).first()
+    assert teacher.preferred_language == "English"
+
+    monkeypatch.setenv("JALTA_SITARA_HOTLINE_LANGUAGE_API_ENABLED", "true")
+    get_settings.cache_clear()
+
+    mock_get = Mock(return_value=_mock_language_response("Hindi"))
+    monkeypatch.setattr(preferred_language_api_service.httpx, "get", mock_get)
+
+    response = send(client, "hello")
+    assert response.json()["current_state"] == "MAIN_MENU"
+
+    db_session.refresh(teacher)
+    assert teacher.preferred_language == "Hindi"

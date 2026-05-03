@@ -12,6 +12,7 @@ os.environ.setdefault("LLM_PROVIDER", "deterministic")
 os.environ.setdefault("DUPLICATE_LESSON_POLICY", "reject")
 os.environ.setdefault("SESSION_TIMEOUT_MINUTES", "30")
 os.environ.setdefault("SUPPORTED_LANGUAGES", "English,Hinglish,Hindi")
+os.environ.setdefault("JALTA_SITARA_HOTLINE_LANGUAGE_API_ENABLED", "false")
 
 import pytest
 from fastapi.testclient import TestClient
