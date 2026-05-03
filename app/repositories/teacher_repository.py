@@ -56,6 +56,45 @@ class TeacherRepository:
         )
         return teacher
 
+
+    def update_preferred_language(
+        self,
+        whatsapp_number: str,
+        preferred_language: str,
+    ) -> TeacherProfile | None:
+        teacher = self.get_by_whatsapp_number(whatsapp_number)
+        if not teacher:
+            return None
+
+        settings = get_settings()
+        normalized_language = normalize_language((preferred_language or "").strip(), default=None)
+        if not normalized_language or normalized_language.casefold() not in settings.supported_languages_casefold:
+            log_event(
+                logger,
+                "teacher_language_sync_skipped_invalid_language",
+                whatsapp_number=whatsapp_number,
+                preferred_language=preferred_language,
+            )
+            return teacher
+
+        current_language = (teacher.preferred_language or "").strip()
+        if current_language.casefold() == normalized_language.casefold():
+            return teacher
+
+        teacher.preferred_language = normalized_language
+        self.db.commit()
+        self.db.refresh(teacher)
+
+        log_event(
+            logger,
+            "teacher_language_synced",
+            whatsapp_number=teacher.whatsapp_number,
+            teacher_id=teacher.id,
+            old_language=current_language,
+            new_language=normalized_language,
+        )
+        return teacher
+
     def upsert(
         self,
         *,

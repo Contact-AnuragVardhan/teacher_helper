@@ -12,6 +12,7 @@ from app.repositories.session_repository import SessionRepository
 from app.repositories.teacher_repository import TeacherRepository
 from app.services.lesson_generator import LessonGeneratorService
 from app.services.lesson_payload_builder import LessonPayloadBuilder
+from app.services.preferred_language_api_service import PreferredLanguageApiService
 from app.services.subject_resolver import SubjectResolver
 from app.state_machine.states import ConversationState
 from app.utils.lesson_title_localization import localize_lesson_display_title
@@ -75,10 +76,10 @@ TEXT: dict[str, dict[str, str]] = {
         "profile_saved": "आपकी प्रोफ़ाइल सेव हो गई है।",
         "profile_updated": "आइए आपकी प्रोफ़ाइल अपडेट करते हैं।",
         "current_profile": "वर्तमान प्रोफ़ाइल:\nनाम: {name}\nग्रेड: {grade}\nविषय: {subject}\nभाषा: {language}",
-        "profile_name_edit": "अपना नाम लिखें, या वर्तमान नाम रखने के लिए 'same' भेजें।",
-        "profile_grade_edit": "वर्तमान ग्रेड/कक्षा: {grade}\nनई ग्रेड/कक्षा लिखें, या रखने के लिए 'same' भेजें। उदाहरण: 1, 2, 3",
-        "profile_subject_edit": "वर्तमान विषय: {subject}\nनया विषय लिखें, या रखने के लिए 'same' भेजें। उदाहरण: गणित",
-        "profile_language_edit": "वर्तमान भाषा: {language}\nनई भाषा लिखें, या रखने के लिए 'same' भेजें। विकल्प: {options}",
+        "profile_name_edit": "अपना नाम लिखें, या वर्तमान नाम रखने के लिए 'same', 'सेम' या 'समान' भेजें।",
+        "profile_grade_edit": "वर्तमान ग्रेड/कक्षा: {grade}\nनई ग्रेड/कक्षा लिखें, या रखने के लिए 'same', 'सेम' या 'समान' भेजें। उदाहरण: 1, 2, 3",
+        "profile_subject_edit": "वर्तमान विषय: {subject}\nनया विषय लिखें, या रखने के लिए 'same', 'सेम' या 'समान' भेजें। उदाहरण: गणित",
+        "profile_language_edit": "वर्तमान भाषा: {language}\nनई भाषा लिखें, या रखने के लिए 'same', 'सेम' या 'समान' भेजें। विकल्प: {options}",
         "all_lessons_empty": "आपके पास अभी कोई सेव या साझा किया गया पाठ नहीं है।",
         "all_lessons_reply": "सभी पाठ:\nकृपया नीचे दी गई सूची से एक पाठ चुनें।",
         "all_lessons_header": "सेव किए गए पाठ",
@@ -300,6 +301,7 @@ class ConversationService:
         self.lesson_generator = LessonGeneratorService(db)
         self.lesson_payload_builder = LessonPayloadBuilder()
         self.subject_resolver = SubjectResolver(self.settings)
+        self.preferred_language_api = PreferredLanguageApiService(self.settings)
 
     def handle_message(self, whatsapp_number: str, incoming_text: str) -> ConversationReply:
         session, was_reset = self.session_repo.get_or_create(whatsapp_number)
@@ -314,7 +316,7 @@ class ConversationService:
         choice = normalize_choice(text)
         if state != ConversationState.MAIN_MENU and self._is_main_menu_choice(choice):
             teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-            language = self._teacher_language(teacher)
+            language = self._teacher_language(teacher, whatsapp_number)
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "back_main"), language)
 
@@ -381,15 +383,35 @@ class ConversationService:
                 return "Subject blank nahi ho sakta."
         return error
 
-    def _teacher_language(self, teacher) -> str:
+    def _teacher_language(self, teacher, whatsapp_number: str | None = None) -> str:
         default_language = self._configured_default_language()
         preferred_language = (getattr(teacher, "preferred_language", None) or "").strip()
-        if not preferred_language:
-            return default_language
-        normalized_language = normalize_language(preferred_language, default=None)
-        if normalized_language and normalized_language.casefold() in self.settings.supported_languages_casefold:
-            return normalized_language
-        return default_language
+        if preferred_language:
+            normalized_language = normalize_language(preferred_language, default=None)
+            if normalized_language and normalized_language.casefold() in self.settings.supported_languages_casefold:
+                resolved_language = normalized_language
+            else:
+                resolved_language = default_language
+        else:
+            resolved_language = default_language
+
+        # Keep the local profile/default-language resolution above, then ask the
+        # Student Helper API for the latest saved preference. If it differs from
+        # the Teacher Helper profile, sync the profile so future requests use it.
+        api_language = self._preferred_language_from_api(whatsapp_number or getattr(teacher, "whatsapp_number", ""))
+        if api_language:
+            if teacher and (getattr(teacher, "preferred_language", "") or "").casefold() != api_language.casefold():
+                self.teacher_repo.update_preferred_language(
+                    getattr(teacher, "whatsapp_number", whatsapp_number or ""),
+                    api_language,
+                )
+            return api_language
+
+        return resolved_language
+
+    def _preferred_language_from_api(self, whatsapp_number: str | None) -> str | None:
+        result = self.preferred_language_api.fetch_preferred_language(whatsapp_number or "")
+        return result.preferred_language if result else None
 
     def _language_options_text(self) -> str:
         languages = self.settings.supported_languages_list or [DEFAULT_LANGUAGE]
@@ -444,7 +466,7 @@ class ConversationService:
         }
 
     def _is_keep_value(self, text: str) -> bool:
-        return normalize_choice(text) in {"same", "skip", "keep", "current"}
+        return normalize_choice(text) in {"same", "skip", "keep", "current", "सेम", "समान"}
 
     def _is_main_menu_choice(self, choice: str) -> bool:
         return choice in {
@@ -824,7 +846,7 @@ class ConversationService:
 
     def _handle_main_menu(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         choice = normalize_choice(text)
 
         if not choice or self._is_greeting(choice):
@@ -868,7 +890,7 @@ class ConversationService:
 
     def _handle_profile_name(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         if not text:
             if teacher:
                 return self._reply(self._profile_name_edit_prompt(teacher, language), ConversationState.PROFILE_NAME)
@@ -888,7 +910,7 @@ class ConversationService:
 
     def _handle_profile_grade(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         if not text:
             if teacher:
                 return self._reply(self._profile_grade_edit_prompt(teacher, language), ConversationState.PROFILE_GRADE)
@@ -917,7 +939,7 @@ class ConversationService:
 
     def _handle_profile_subject(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         if not text:
             if teacher:
                 return self._reply(self._profile_subject_edit_prompt(teacher, language), ConversationState.PROFILE_SUBJECT)
@@ -944,6 +966,22 @@ class ConversationService:
                 )
 
         session.temp_profile_subject = subject_value
+
+        api_language = self._preferred_language_from_api(whatsapp_number)
+        if api_language:
+            self.teacher_repo.upsert(
+                whatsapp_number=whatsapp_number,
+                teacher_name=session.temp_profile_name or "",
+                default_grade=session.temp_profile_grade or "",
+                default_subject=session.temp_profile_subject or "",
+                preferred_language=api_language,
+            )
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply(self._text(api_language, "profile_saved"), api_language)
+
+        # Language question is intentionally kept in the code for fallback/local
+        # testing, but the normal production flow saves the language received
+        # from the Jalta Sitara Hotline API above instead of asking the teacher again.
         session.current_state = ConversationState.PROFILE_LANGUAGE.value
         self.session_repo.save(session)
 
@@ -953,7 +991,7 @@ class ConversationService:
 
     def _handle_profile_language(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         if not text:
             if teacher:
                 return self._reply(self._profile_language_edit_prompt(teacher, language), ConversationState.PROFILE_LANGUAGE)
@@ -984,7 +1022,7 @@ class ConversationService:
 
     def _handle_new_lesson_topic(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         if not text:
             log_event(logger, "validation_failure", field="topic", value=text)
             return self._reply(self._text(language, "new_lesson_topic_invalid"), ConversationState.NEW_LESSON_TOPIC)
@@ -996,7 +1034,7 @@ class ConversationService:
 
     def _handle_new_lesson_grade(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         if not text:
             return self._reply(self._new_lesson_grade_prompt(language), ConversationState.NEW_LESSON_GRADE)
 
@@ -1016,7 +1054,7 @@ class ConversationService:
 
     def _handle_new_lesson_subject(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         if not text:
             return self._reply(self._new_lesson_subject_prompt(language), ConversationState.NEW_LESSON_SUBJECT)
 
@@ -1037,7 +1075,7 @@ class ConversationService:
 
     def _handle_new_lesson_duration(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         duration = parse_duration_minutes(text)
         if duration is None:
             log_event(logger, "validation_failure", field="duration_minutes", value=text)
@@ -1067,7 +1105,7 @@ class ConversationService:
 
     def _handle_new_lesson_confirm_save(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         choice = normalize_choice(text)
 
         if choice in {"1", "yes", "save lesson", "save_lesson", "पाठ सेव करें"}:
@@ -1099,7 +1137,7 @@ class ConversationService:
 
     def _handle_new_lesson_confirm_name(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         choice = normalize_choice(text)
 
         if not teacher:
@@ -1168,7 +1206,7 @@ class ConversationService:
 
     def _handle_new_lesson_name(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         if not text:
             log_event(logger, "validation_failure", field="lesson_name", value=text)
             return self._reply(self._text(language, "lesson_name_invalid"), ConversationState.NEW_LESSON_NAME)
@@ -1182,7 +1220,7 @@ class ConversationService:
 
     def _handle_retrieve_lesson_name(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         choice = normalize_choice(text)
 
         if choice in {"0", "back", "वापस"} or self._is_main_menu_choice(choice):
@@ -1283,7 +1321,7 @@ class ConversationService:
 
     def _handle_lesson_action_menu(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         if not teacher:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "create_profile_first"), language)
@@ -1330,7 +1368,7 @@ class ConversationService:
 
     def _handle_share_lesson_phone(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         if not teacher:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "create_profile_first"), language)
@@ -1401,7 +1439,7 @@ class ConversationService:
 
     def _handle_delete_lesson_confirm(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
-        language = self._teacher_language(teacher)
+        language = self._teacher_language(teacher, whatsapp_number)
         if not teacher:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "create_profile_first"), language)

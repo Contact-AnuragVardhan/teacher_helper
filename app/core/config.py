@@ -65,6 +65,37 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("whatsapp_api_timeout_seconds", "WHATSAPP_API_TIMEOUT_SECONDS"),
     )
 
+    jalta_sitara_hotline_language_api_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "jalta_sitara_hotline_language_api_enabled",
+            "JALTA_SITARA_HOTLINE_LANGUAGE_API_ENABLED",
+            # Backward-compatible aliases for older deployments.
+            "student_helper_language_api_enabled",
+            "STUDENT_HELPER_LANGUAGE_API_ENABLED",
+        ),
+    )
+    jalta_sitara_hotline_base_url: str = Field(
+        default="https://student-helper-reai.onrender.com",
+        validation_alias=AliasChoices(
+            "jalta_sitara_hotline_base_url",
+            "JALTA_SITARA_HOTLINE_BASE_URL",
+            # Backward-compatible aliases for older deployments.
+            "student_helper_base_url",
+            "STUDENT_HELPER_BASE_URL",
+        ),
+    )
+    jalta_sitara_hotline_language_api_timeout_seconds: float = Field(
+        default=5.0,
+        validation_alias=AliasChoices(
+            "jalta_sitara_hotline_language_api_timeout_seconds",
+            "JALTA_SITARA_HOTLINE_LANGUAGE_API_TIMEOUT_SECONDS",
+            # Backward-compatible aliases for older deployments.
+            "student_helper_language_api_timeout_seconds",
+            "STUDENT_HELPER_LANGUAGE_API_TIMEOUT_SECONDS",
+        ),
+    )
+
     log_level: str = Field(default="INFO", validation_alias=AliasChoices("log_level", "LOG_LEVEL"))
     allow_origins: str = Field(default="http://localhost:5173", validation_alias=AliasChoices("allow_origins", "ALLOW_ORIGINS"))
     ncert_chunk_size: int = Field(default=650, validation_alias=AliasChoices("ncert_chunk_size", "NCERT_CHUNK_SIZE"))
@@ -105,6 +136,18 @@ class Settings(BaseSettings):
         if value <= 0:
             raise ValueError("WHATSAPP_API_TIMEOUT_SECONDS must be greater than 0.")
         return value
+
+    @field_validator("jalta_sitara_hotline_language_api_timeout_seconds")
+    @classmethod
+    def validate_jalta_sitara_hotline_language_api_timeout(cls, value: float) -> float:
+        if value <= 0:
+            raise ValueError("JALTA_SITARA_HOTLINE_LANGUAGE_API_TIMEOUT_SECONDS must be greater than 0.")
+        return value
+
+    @field_validator("jalta_sitara_hotline_base_url")
+    @classmethod
+    def validate_jalta_sitara_hotline_base_url(cls, value: str) -> str:
+        return (value or "").rstrip("/")
 
     @property
     def database_is_sqlite(self) -> bool:

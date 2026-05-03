@@ -7,6 +7,7 @@ from app.core.logging import get_logger, log_event
 from app.db.session import get_db
 from app.repositories.teacher_repository import TeacherRepository
 from app.schemas.teacher import TeacherResponse, TeacherUpsertRequest
+from app.services.preferred_language_api_service import PreferredLanguageApiService
 from app.services.subject_resolver import SubjectResolver
 from app.utils.profile_validation import validate_profile_grade, validate_profile_subject
 from app.utils.text import normalize_grade
@@ -18,10 +19,16 @@ logger = get_logger(__name__)
 @router.get("/{whatsapp_number}", response_model=TeacherResponse)
 def get_teacher(whatsapp_number: str, db: Session = Depends(get_db)) -> TeacherResponse:
     log_event(logger, "teacher_fetch_requested", whatsapp_number=whatsapp_number)
-    teacher = TeacherRepository(db).get_by_whatsapp_number(whatsapp_number)
+    teacher_repo = TeacherRepository(db)
+    teacher = teacher_repo.get_by_whatsapp_number(whatsapp_number)
     if not teacher:
         log_event(logger, "teacher_fetch_not_found", whatsapp_number=whatsapp_number)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Teacher not found.")
+
+    api_language_result = PreferredLanguageApiService(get_settings()).fetch_preferred_language(whatsapp_number)
+    if api_language_result and teacher.preferred_language.casefold() != api_language_result.preferred_language.casefold():
+        teacher = teacher_repo.update_preferred_language(whatsapp_number, api_language_result.preferred_language) or teacher
+
     log_event(logger, "teacher_fetch_completed", whatsapp_number=whatsapp_number, teacher_id=teacher.id)
     return teacher
 
@@ -35,6 +42,10 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
         if raw_language
         else settings.default_language
     )
+
+    api_language_result = PreferredLanguageApiService(settings).fetch_preferred_language(payload.whatsapp_number)
+    if api_language_result:
+        preferred_language = api_language_result.preferred_language
 
     log_event(
         logger,
