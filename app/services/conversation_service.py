@@ -453,7 +453,6 @@ class ConversationService:
             if item.is_shared and not display_title.startswith("*"):
                 display_title = f"* {display_title}"
             localized.append(replace(item, display_title=display_title))
-        localized.sort(key=lambda item: item.display_title.casefold())
         return localized
 
     def _is_greeting(self, choice: str) -> bool:

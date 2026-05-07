@@ -335,7 +335,7 @@ def search_library_lessons(
     if topic:
         query = query.filter(func.lower(LessonPlan.topic) == topic.strip().lower())
 
-    rows = query.order_by(LessonPlan.updated_at.desc()).all()
+    rows = query.order_by(LessonPlan.updated_at.desc(), LessonPlan.id.desc()).all()
 
     items = [
         {
