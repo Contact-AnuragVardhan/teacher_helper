@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -21,6 +22,7 @@ class AccessibleLessonSummary:
     display_title: str
     is_shared: bool
     topic: str | None = None
+    updated_at: datetime | None = None
     shared_by_teacher_id: int | None = None
     shared_by_teacher_name: str | None = None
 
@@ -111,7 +113,7 @@ class LessonRepository:
 
     def list_accessible_summaries_for_teacher(self, teacher_id: int) -> list[AccessibleLessonSummary]:
         owned_rows = (
-            self.db.query(LessonPlan.id, LessonPlan.lesson_name, LessonPlan.topic)
+            self.db.query(LessonPlan.id, LessonPlan.lesson_name, LessonPlan.topic, LessonPlan.updated_at)
             .filter(LessonPlan.teacher_id == teacher_id)
             .all()
         )
@@ -120,6 +122,7 @@ class LessonRepository:
                 LessonPlan.id,
                 LessonPlan.lesson_name,
                 LessonPlan.topic,
+                LessonPlan.updated_at,
                 LessonShare.shared_by_teacher_id,
                 TeacherProfile.teacher_name,
             )
@@ -136,6 +139,7 @@ class LessonRepository:
                 display_title=row[1],
                 is_shared=False,
                 topic=row[2],
+                updated_at=row[3],
             )
             for row in owned_rows
         ]
@@ -146,12 +150,16 @@ class LessonRepository:
                 display_title=f"* {row[1]}",
                 is_shared=True,
                 topic=row[2],
-                shared_by_teacher_id=row[3],
-                shared_by_teacher_name=row[4],
+                updated_at=row[3],
+                shared_by_teacher_id=row[4],
+                shared_by_teacher_name=row[5],
             )
             for row in shared_rows
         )
-        summaries.sort(key=lambda item: item.display_title.casefold())
+        summaries.sort(
+            key=lambda item: (item.updated_at or datetime.min, item.lesson_id),
+            reverse=True,
+        )
 
         log_event(
             logger,
