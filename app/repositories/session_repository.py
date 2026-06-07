@@ -69,6 +69,24 @@ class SessionRepository:
         session.temp_generated_lesson = None
         session.temp_lesson_name = None
         session.temp_selected_lesson_id = None
+        session.temp_content_document_id = None
+        session.temp_content_chapter_id = None
+        session.temp_content_subsection_id = None
+        session.temp_lesson_day_number = None
+        session.temp_lesson_day_title = None
+        session.temp_lesson_book_title = None
+        session.temp_lesson_chapter_title = None
+        session.temp_lesson_section_title = None
+        session.temp_lesson_subsection_number = None
+        session.temp_lesson_subsection_title = None
+        session.temp_lesson_book_pages = None
+        session.temp_lesson_pdf_start_page = None
+        session.temp_lesson_pdf_end_page = None
+        session.temp_lesson_printed_start_page = None
+        session.temp_lesson_printed_end_page = None
+        session.temp_lesson_document_key = None
+        session.temp_lesson_school_name = None
+        session.temp_lesson_summary = None
         log_event(logger, "session_clear_temp_lesson", whatsapp_number=session.whatsapp_number)
         return self.save(session)
 
@@ -76,6 +94,7 @@ class SessionRepository:
         session.temp_profile_name = None
         session.temp_profile_grade = None
         session.temp_profile_subject = None
+        session.temp_profile_school = None
         log_event(logger, "session_clear_temp_profile", whatsapp_number=session.whatsapp_number)
         return self.save(session)
 
@@ -86,9 +105,28 @@ class SessionRepository:
         session.temp_generated_lesson = None
         session.temp_lesson_name = None
         session.temp_selected_lesson_id = None
+        session.temp_content_document_id = None
+        session.temp_content_chapter_id = None
+        session.temp_content_subsection_id = None
+        session.temp_lesson_day_number = None
+        session.temp_lesson_day_title = None
+        session.temp_lesson_book_title = None
+        session.temp_lesson_chapter_title = None
+        session.temp_lesson_section_title = None
+        session.temp_lesson_subsection_number = None
+        session.temp_lesson_subsection_title = None
+        session.temp_lesson_book_pages = None
+        session.temp_lesson_pdf_start_page = None
+        session.temp_lesson_pdf_end_page = None
+        session.temp_lesson_printed_start_page = None
+        session.temp_lesson_printed_end_page = None
+        session.temp_lesson_document_key = None
+        session.temp_lesson_school_name = None
+        session.temp_lesson_summary = None
         session.temp_profile_name = None
         session.temp_profile_grade = None
         session.temp_profile_subject = None
+        session.temp_profile_school = None
         session.updated_at = datetime.utcnow()
         log_event(logger, "session_reset_main_menu", whatsapp_number=session.whatsapp_number)
         return self.save(session)

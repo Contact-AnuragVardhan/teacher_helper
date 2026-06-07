@@ -10,6 +10,7 @@ class TeacherUpsertRequest(BaseModel):
     teacher_name: str
     default_grade: str
     default_subject: str
+    school_name: str | None = None
     preferred_language: str = DEFAULT_LANGUAGE
 
 
@@ -19,6 +20,7 @@ class TeacherResponse(BaseModel):
     teacher_name: str
     default_grade: str
     default_subject: str
+    school_name: str | None = None
     preferred_language: str
     created_at: datetime
     updated_at: datetime

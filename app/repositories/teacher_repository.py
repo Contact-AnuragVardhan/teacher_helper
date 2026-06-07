@@ -103,6 +103,7 @@ class TeacherRepository:
         default_grade: str,
         default_subject: str,
         preferred_language: str,
+        school_name: str | None = None,
     ) -> TeacherProfile:
         canonical_number = self._canonical_whatsapp_number(whatsapp_number)
         teacher = self.get_by_whatsapp_number(canonical_number)
@@ -122,6 +123,7 @@ class TeacherRepository:
             teacher.teacher_name = teacher_name
             teacher.default_grade = default_grade
             teacher.default_subject = normalized_subject
+            teacher.school_name = (school_name or "").strip() or None
             teacher.preferred_language = normalized_language
         else:
             teacher = TeacherProfile(
@@ -129,6 +131,7 @@ class TeacherRepository:
                 teacher_name=teacher_name,
                 default_grade=default_grade,
                 default_subject=normalized_subject,
+                school_name=(school_name or "").strip() or None,
                 preferred_language=normalized_language,
             )
             self.db.add(teacher)
@@ -142,5 +145,6 @@ class TeacherRepository:
             teacher_id=teacher.id,
             action=action,
             preferred_language=normalized_language,
+            school_name=(school_name or "").strip() or None,
         )
         return teacher

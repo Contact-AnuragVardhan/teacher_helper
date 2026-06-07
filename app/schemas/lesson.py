@@ -72,6 +72,25 @@ class LessonResponse(BaseModel):
     duration_minutes: int
     lesson_text: str
     lesson_payload: dict[str, Any] | None = None
+    document_id: str | None = None
+    document_key: str | None = None
+    book_title: str | None = None
+    school_name: str | None = None
+    chapter_id: str | None = None
+    subsection_id: str | None = None
+    chapter_title: str | None = None
+    section_title: str | None = None
+    subsection_number: str | None = None
+    subsection_title: str | None = None
+    day_number: int | None = None
+    day_title: str | None = None
+    book_pages: str | None = None
+    pdf_start_page: int | None = None
+    pdf_end_page: int | None = None
+    printed_start_page: int | None = None
+    printed_end_page: int | None = None
+    resource_profile: str | None = None
+    format_profile: str | None = None
     created_at: datetime
     updated_at: datetime
 

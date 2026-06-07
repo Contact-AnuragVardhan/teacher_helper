@@ -21,6 +21,29 @@ class LessonPlan(Base):
     duration_minutes: Mapped[int] = mapped_column(Integer, nullable=False)
     lesson_text: Mapped[str] = mapped_column(Text, nullable=False)
     lesson_payload: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
+    # Source references for lessons generated from pdf_to_embeddings.
+    # Kept as nullable so older/generic lesson plans continue to work.
+    document_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    document_key: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
+    book_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    school_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    chapter_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    subsection_id: Mapped[str | None] = mapped_column(String(80), nullable=True, index=True)
+    chapter_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    section_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    subsection_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    subsection_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    day_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    day_title: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    book_pages: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    pdf_start_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    pdf_end_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    printed_start_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    printed_end_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    resource_profile: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    format_profile: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,

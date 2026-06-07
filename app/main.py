@@ -11,6 +11,7 @@ from app.api.routes.webhook import router as webhook_router
 from app.core.config import get_settings
 from app.core.logging import configure_logging, log_event
 from app.db.base import Base
+from app.db.schema_compat import ensure_runtime_columns
 from app.db.session import engine
 import app.models
 from app.api.routes.library import router as library_router
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
         log_event(logger, "database_reset_requested")
         Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
+    ensure_runtime_columns(engine)
     log_event(logger, "database_ready")
     yield
     log_event(logger, "app_shutdown")
