@@ -23,6 +23,13 @@ class AccessibleLessonSummary:
     is_shared: bool
     topic: str | None = None
     updated_at: datetime | None = None
+    day_number: int | None = None
+    day_title: str | None = None
+    book_title: str | None = None
+    chapter_title: str | None = None
+    section_title: str | None = None
+    subsection_title: str | None = None
+    book_pages: str | None = None
     shared_by_teacher_id: int | None = None
     shared_by_teacher_name: str | None = None
 
@@ -113,7 +120,19 @@ class LessonRepository:
 
     def list_accessible_summaries_for_teacher(self, teacher_id: int) -> list[AccessibleLessonSummary]:
         owned_rows = (
-            self.db.query(LessonPlan.id, LessonPlan.lesson_name, LessonPlan.topic, LessonPlan.updated_at)
+            self.db.query(
+                LessonPlan.id,
+                LessonPlan.lesson_name,
+                LessonPlan.topic,
+                LessonPlan.updated_at,
+                LessonPlan.day_number,
+                LessonPlan.day_title,
+                LessonPlan.book_title,
+                LessonPlan.chapter_title,
+                LessonPlan.section_title,
+                LessonPlan.subsection_title,
+                LessonPlan.book_pages,
+            )
             .filter(LessonPlan.teacher_id == teacher_id)
             .all()
         )
@@ -123,6 +142,13 @@ class LessonRepository:
                 LessonPlan.lesson_name,
                 LessonPlan.topic,
                 LessonPlan.updated_at,
+                LessonPlan.day_number,
+                LessonPlan.day_title,
+                LessonPlan.book_title,
+                LessonPlan.chapter_title,
+                LessonPlan.section_title,
+                LessonPlan.subsection_title,
+                LessonPlan.book_pages,
                 LessonShare.shared_by_teacher_id,
                 TeacherProfile.teacher_name,
             )
@@ -140,6 +166,13 @@ class LessonRepository:
                 is_shared=False,
                 topic=row[2],
                 updated_at=row[3],
+                day_number=row[4],
+                day_title=row[5],
+                book_title=row[6],
+                chapter_title=row[7],
+                section_title=row[8],
+                subsection_title=row[9],
+                book_pages=row[10],
             )
             for row in owned_rows
         ]
@@ -151,8 +184,15 @@ class LessonRepository:
                 is_shared=True,
                 topic=row[2],
                 updated_at=row[3],
-                shared_by_teacher_id=row[4],
-                shared_by_teacher_name=row[5],
+                day_number=row[4],
+                day_title=row[5],
+                book_title=row[6],
+                chapter_title=row[7],
+                section_title=row[8],
+                subsection_title=row[9],
+                book_pages=row[10],
+                shared_by_teacher_id=row[11],
+                shared_by_teacher_name=row[12],
             )
             for row in shared_rows
         )
@@ -181,6 +221,25 @@ class LessonRepository:
         duration_minutes: int,
         lesson_text: str,
         lesson_payload: dict | None,
+        document_id: str | None = None,
+        document_key: str | None = None,
+        book_title: str | None = None,
+        school_name: str | None = None,
+        chapter_id: str | None = None,
+        subsection_id: str | None = None,
+        chapter_title: str | None = None,
+        section_title: str | None = None,
+        subsection_number: str | None = None,
+        subsection_title: str | None = None,
+        day_number: int | None = None,
+        day_title: str | None = None,
+        book_pages: str | None = None,
+        pdf_start_page: int | None = None,
+        pdf_end_page: int | None = None,
+        printed_start_page: int | None = None,
+        printed_end_page: int | None = None,
+        resource_profile: str | None = None,
+        format_profile: str | None = None,
     ) -> LessonPlan:
         lesson = LessonPlan(
             teacher_id=teacher_id,
@@ -191,6 +250,25 @@ class LessonRepository:
             duration_minutes=duration_minutes,
             lesson_text=lesson_text,
             lesson_payload=lesson_payload,
+            document_id=document_id,
+            document_key=document_key,
+            book_title=book_title,
+            school_name=school_name,
+            chapter_id=chapter_id,
+            subsection_id=subsection_id,
+            chapter_title=chapter_title,
+            section_title=section_title,
+            subsection_number=subsection_number,
+            subsection_title=subsection_title,
+            day_number=day_number,
+            day_title=day_title,
+            book_pages=book_pages,
+            pdf_start_page=pdf_start_page,
+            pdf_end_page=pdf_end_page,
+            printed_start_page=printed_start_page,
+            printed_end_page=printed_end_page,
+            resource_profile=resource_profile,
+            format_profile=format_profile,
         )
         self.db.add(lesson)
         try:
@@ -224,6 +302,25 @@ class LessonRepository:
         duration_minutes: int,
         lesson_text: str,
         lesson_payload: dict | None,
+        document_id: str | None = None,
+        document_key: str | None = None,
+        book_title: str | None = None,
+        school_name: str | None = None,
+        chapter_id: str | None = None,
+        subsection_id: str | None = None,
+        chapter_title: str | None = None,
+        section_title: str | None = None,
+        subsection_number: str | None = None,
+        subsection_title: str | None = None,
+        day_number: int | None = None,
+        day_title: str | None = None,
+        book_pages: str | None = None,
+        pdf_start_page: int | None = None,
+        pdf_end_page: int | None = None,
+        printed_start_page: int | None = None,
+        printed_end_page: int | None = None,
+        resource_profile: str | None = None,
+        format_profile: str | None = None,
     ) -> LessonPlan:
         lesson.topic = topic.strip()
         lesson.grade = grade.strip()
@@ -231,6 +328,25 @@ class LessonRepository:
         lesson.duration_minutes = duration_minutes
         lesson.lesson_text = lesson_text
         lesson.lesson_payload = lesson_payload
+        lesson.document_id = document_id
+        lesson.document_key = document_key
+        lesson.book_title = book_title
+        lesson.school_name = school_name
+        lesson.chapter_id = chapter_id
+        lesson.subsection_id = subsection_id
+        lesson.chapter_title = chapter_title
+        lesson.section_title = section_title
+        lesson.subsection_number = subsection_number
+        lesson.subsection_title = subsection_title
+        lesson.day_number = day_number
+        lesson.day_title = day_title
+        lesson.book_pages = book_pages
+        lesson.pdf_start_page = pdf_start_page
+        lesson.pdf_end_page = pdf_end_page
+        lesson.printed_start_page = printed_start_page
+        lesson.printed_end_page = printed_end_page
+        lesson.resource_profile = resource_profile
+        lesson.format_profile = format_profile
         self.db.add(lesson)
         self.db.commit()
         self.db.refresh(lesson)
@@ -254,6 +370,25 @@ class LessonRepository:
         duration_minutes: int,
         lesson_text: str,
         lesson_payload: dict | None,
+        document_id: str | None = None,
+        document_key: str | None = None,
+        book_title: str | None = None,
+        school_name: str | None = None,
+        chapter_id: str | None = None,
+        subsection_id: str | None = None,
+        chapter_title: str | None = None,
+        section_title: str | None = None,
+        subsection_number: str | None = None,
+        subsection_title: str | None = None,
+        day_number: int | None = None,
+        day_title: str | None = None,
+        book_pages: str | None = None,
+        pdf_start_page: int | None = None,
+        pdf_end_page: int | None = None,
+        printed_start_page: int | None = None,
+        printed_end_page: int | None = None,
+        resource_profile: str | None = None,
+        format_profile: str | None = None,
     ) -> LessonPlan | None:
         settings = get_settings()
         existing = self.get_by_teacher_and_name(teacher_id, lesson_name)
@@ -280,6 +415,25 @@ class LessonRepository:
                 duration_minutes=duration_minutes,
                 lesson_text=lesson_text,
                 lesson_payload=lesson_payload,
+                document_id=document_id,
+                document_key=document_key,
+                book_title=book_title,
+                school_name=school_name,
+                chapter_id=chapter_id,
+                subsection_id=subsection_id,
+                chapter_title=chapter_title,
+                section_title=section_title,
+                subsection_number=subsection_number,
+                subsection_title=subsection_title,
+                day_number=day_number,
+                day_title=day_title,
+                book_pages=book_pages,
+                pdf_start_page=pdf_start_page,
+                pdf_end_page=pdf_end_page,
+                printed_start_page=printed_start_page,
+                printed_end_page=printed_end_page,
+                resource_profile=resource_profile,
+                format_profile=format_profile,
             )
 
         log_event(
@@ -297,6 +451,25 @@ class LessonRepository:
             duration_minutes=duration_minutes,
             lesson_text=lesson_text,
             lesson_payload=lesson_payload,
+            document_id=document_id,
+            document_key=document_key,
+            book_title=book_title,
+            school_name=school_name,
+            chapter_id=chapter_id,
+            subsection_id=subsection_id,
+            chapter_title=chapter_title,
+            section_title=section_title,
+            subsection_number=subsection_number,
+            subsection_title=subsection_title,
+            day_number=day_number,
+            day_title=day_title,
+            book_pages=book_pages,
+            pdf_start_page=pdf_start_page,
+            pdf_end_page=pdf_end_page,
+            printed_start_page=printed_start_page,
+            printed_end_page=printed_end_page,
+            resource_profile=resource_profile,
+            format_profile=format_profile,
         )
 
     def delete_owned_lesson(self, teacher_id: int, lesson_id: int) -> bool:

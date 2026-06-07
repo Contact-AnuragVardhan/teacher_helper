@@ -202,7 +202,9 @@ class LessonPayloadBuilder:
         return None
 
     def _normalize_heading(self, line: str) -> str:
-        return re.sub(r"\s*\([^)]*\)\s*$", "", line.rstrip(":").strip()).casefold()
+        cleaned = re.sub(r"^[^0-9A-Za-z\u0900-\u097F]+", "", line or "").strip()
+        cleaned = re.sub(r"\s*\([^)]*\)\s*$", "", cleaned.rstrip(":").strip())
+        return cleaned.casefold()
 
     def _strip_bullet(self, line: str) -> str:
         return re.sub(r"^(?:[-•*]+|\d+[\.)-])\s*", "", line).strip()
@@ -219,6 +221,12 @@ class LessonPayloadBuilder:
                 "subject -",
                 "duration:",
                 "duration -",
+                "chapter:",
+                "chapter -",
+                "book pages:",
+                "book pages -",
+                "resource profile:",
+                "resource profile -",
                 "टॉपिक:",
                 "टॉपिक -",
                 "ग्रेड/कक्षा:",

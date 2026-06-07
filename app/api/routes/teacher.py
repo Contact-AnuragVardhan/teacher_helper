@@ -59,6 +59,7 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
         whatsapp_number=payload.whatsapp_number,
         default_grade=payload.default_grade,
         default_subject=payload.default_subject,
+        school_name=payload.school_name,
         preferred_language=payload.preferred_language,
         normalized_language=preferred_language,
     )
@@ -98,6 +99,7 @@ def upsert_teacher(payload: TeacherUpsertRequest, db: Session = Depends(get_db))
         teacher_name=payload.teacher_name.strip(),
         default_grade=normalized_grade,
         default_subject=normalized_subject,
+        school_name=payload.school_name,
         preferred_language=preferred_language,
     )
     try:
