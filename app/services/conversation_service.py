@@ -47,8 +47,16 @@ TEXT: dict[str, dict[str, str]] = {
         "all_lessons_next": "अगला पेज",
         "all_lessons_previous": "पिछला पेज",
         "new_lesson_without_profile": "कृपया पहले अपनी प्रोफ़ाइल पूरी करें।\nआपका नाम क्या है?",
-        "new_lesson_topic_prompt": "आप किस विषय पर पाठ पढ़ाना चाहते हैं? उदाहरण: \"झाँसी की रानी\"",
-        "new_lesson_topic_invalid": "कृपया पाठ का विषय लिखें, उदाहरण: \"झाँसी की रानी\"।",
+        "new_lesson_topic_prompt": "कृपया नीचे दी गई सूची से lesson/chapter चुनें।",
+        "new_lesson_topic_invalid": "कृपया सूची से सही lesson/chapter चुनें।",
+        "lesson_topic_header": "Lesson चुनें",
+        "lesson_topic_body": "Grade और subject के आधार पर lesson/chapter चुनें। Page {page}/{total_pages}.",
+        "lesson_topic_button": "Lessons",
+        "lesson_topic_section": "Lessons",
+        "lesson_topic_footer": "नीचे एक lesson/chapter टैप करें।",
+        "lesson_topic_empty": "{school_name} में Class {grade} / {subject} के लिए कोई lesson/chapter नहीं मिला। कृपया subject फिर से लिखें या main menu पर वापस जाएँ।",
+        "lesson_topic_next": "अगला पेज",
+        "lesson_topic_previous": "पिछला पेज",
         "new_lesson_grade_prompt": "इस पाठ के लिए ग्रेड/कक्षा लिखें। उदाहरण: 1, 2, 3",
         "new_lesson_subject_prompt": "इस पाठ का विषय/सब्जेक्ट लिखें। उदाहरण: गणित",
         "duration_prompt": "कक्षा की अवधि मिनटों में लिखें। उदाहरण: 35",
@@ -151,8 +159,16 @@ TEXT: dict[str, dict[str, str]] = {
         "all_lessons_next": "Next Page",
         "all_lessons_previous": "Previous Page",
         "new_lesson_without_profile": "Please complete your profile first.\nWhat is your name?",
-        "new_lesson_topic_prompt": "What lesson topic would you like to teach? Example: \"Jhansi Ki Rani\"",
-        "new_lesson_topic_invalid": "Please enter a lesson topic, for example \"Jhansi Ki Rani\".",
+        "new_lesson_topic_prompt": "Please select the lesson/chapter you would like to teach from the list below.",
+        "new_lesson_topic_invalid": "Please select a valid lesson/chapter from the list below.",
+        "lesson_topic_header": "Choose Lesson",
+        "lesson_topic_body": "Select a lesson/chapter for the grade and subject you entered. Page {page}/{total_pages}.",
+        "lesson_topic_button": "Lessons",
+        "lesson_topic_section": "Lessons",
+        "lesson_topic_footer": "Tap one lesson/chapter below.",
+        "lesson_topic_empty": "No lesson/chapter was found for {school_name}, Class {grade}, {subject}. Please enter the subject again, or send Main Menu to go back.",
+        "lesson_topic_next": "Next Page",
+        "lesson_topic_previous": "Previous Page",
         "new_lesson_grade_prompt": "Please enter the grade/class for this lesson. Example: 1, 2, 3",
         "new_lesson_subject_prompt": "Please enter the subject for this lesson. Example: English",
         "duration_prompt": "Please enter class duration in minutes. Example: 35",
@@ -255,8 +271,16 @@ TEXT: dict[str, dict[str, str]] = {
         "all_lessons_next": "Next Page",
         "all_lessons_previous": "Previous Page",
         "new_lesson_without_profile": "Please pehle apni profile complete karein.\nAapka naam kya hai?",
-        "new_lesson_topic_prompt": "Aap kis topic par lesson banana chahte hain? Example: \"Jhansi Ki Rani\"",
-        "new_lesson_topic_invalid": "Please lesson topic likhein, example: \"Jhansi Ki Rani\".",
+        "new_lesson_topic_prompt": "Please neeche list se lesson/chapter choose karein.",
+        "new_lesson_topic_invalid": "Please list se valid lesson/chapter choose karein.",
+        "lesson_topic_header": "Choose Lesson",
+        "lesson_topic_body": "Entered grade aur subject ke liye lesson/chapter choose karein. Page {page}/{total_pages}.",
+        "lesson_topic_button": "Lessons",
+        "lesson_topic_section": "Lessons",
+        "lesson_topic_footer": "Neeche ek lesson/chapter tap karein.",
+        "lesson_topic_empty": "{school_name} mein Class {grade} / {subject} ke liye koi lesson/chapter nahi mila. Please subject phir se likhein ya Main Menu bhejein.",
+        "lesson_topic_next": "Next Page",
+        "lesson_topic_previous": "Previous Page",
         "new_lesson_grade_prompt": "Is lesson ke liye grade/class likhein. Example: 1, 2, 3",
         "new_lesson_subject_prompt": "Is lesson ka subject likhein. Example: English",
         "duration_prompt": "Class duration minutes mein likhein. Example: 35",
@@ -667,6 +691,115 @@ class ConversationService:
                 ],
             },
         )
+
+    def _lesson_topic_reply(
+        self,
+        *,
+        lessons: list[EmbeddingLessonMatch],
+        language: str,
+        page: int = 0,
+    ) -> ConversationReply:
+        page_size = 7
+        total_lessons = len(lessons)
+        total_pages = max(1, (total_lessons + page_size - 1) // page_size)
+        page = max(0, min(page, total_pages - 1))
+        start_index = page * page_size
+        page_lessons = lessons[start_index : start_index + page_size]
+
+        rows: list[dict[str, str]] = []
+        for index, lesson in enumerate(page_lessons, start=start_index + 1):
+            title = lesson.title or f"Lesson {index}"
+            description_parts: list[str] = []
+            if lesson.section_number:
+                description_parts.append(f"Section {lesson.section_number}")
+            elif lesson.chapter_number:
+                description_parts.append(f"Chapter {lesson.chapter_number}")
+            if lesson.book_title:
+                description_parts.append(lesson.book_title)
+            if lesson.display_pages != "Not available":
+                description_parts.append(f"Pages {lesson.display_pages}")
+            rows.append(
+                {
+                    "id": f"lesson_topic:{lesson.chapter_id}",
+                    "title": title[:24],
+                    "description": " | ".join(part for part in description_parts if part)[:72],
+                }
+            )
+
+        if page > 0:
+            rows.append({"id": f"lesson_topic_page:{page - 1}", "title": self._text(language, "lesson_topic_previous")[:24]})
+        if page < total_pages - 1:
+            rows.append({"id": f"lesson_topic_page:{page + 1}", "title": self._text(language, "lesson_topic_next")[:24]})
+        rows.append(self._main_menu_row(language))
+
+        return self._reply(
+            self._text(language, "new_lesson_topic_prompt"),
+            ConversationState.NEW_LESSON_TOPIC,
+            outbound={
+                "type": "list",
+                "header": self._text(language, "lesson_topic_header"),
+                "body": self._text(
+                    language,
+                    "lesson_topic_body",
+                    page=page + 1,
+                    total_pages=total_pages,
+                ),
+                "button_text": self._text(language, "lesson_topic_button"),
+                "section_title": self._text(language, "lesson_topic_section"),
+                "footer": self._text(language, "lesson_topic_footer"),
+                "rows": rows,
+            },
+        )
+
+    def _lesson_topic_list_for_session(self, session, teacher) -> list[EmbeddingLessonMatch]:
+        return self.embedding_content_repo.list_lessons_for_selection(
+            school_name=(getattr(teacher, "school_name", None) or "").strip(),
+            grade=(session.temp_profile_grade or "").strip() or teacher.default_grade,
+            subject=(session.temp_profile_subject or "").strip() or teacher.default_subject,
+        )
+
+    def _resolve_lesson_topic_choice(
+        self,
+        *,
+        choice: str,
+        text: str,
+        lessons: list[EmbeddingLessonMatch],
+        teacher,
+        session,
+    ) -> EmbeddingLessonMatch | None:
+        selected_id = ""
+        if choice.startswith("lesson_topic:"):
+            selected_id = choice.split(":", 1)[1].strip()
+        if selected_id:
+            for lesson in lessons:
+                if lesson.chapter_id == selected_id:
+                    return lesson
+            return self.embedding_content_repo.get_lesson_by_chapter_id(selected_id)
+
+        raw = (text or choice or "").strip()
+        if raw.isdigit():
+            index = int(raw)
+            if 1 <= index <= len(lessons):
+                return lessons[index - 1]
+
+        if raw:
+            return self.embedding_content_repo.find_lesson_match(
+                school_name=(getattr(teacher, "school_name", None) or "").strip(),
+                grade=(session.temp_profile_grade or "").strip() or teacher.default_grade,
+                subject=(session.temp_profile_subject or "").strip() or teacher.default_subject,
+                topic=raw,
+            )
+        return None
+
+    def _store_selected_lesson_topic(self, session, lesson: EmbeddingLessonMatch) -> None:
+        session.temp_topic = lesson.title
+        session.temp_content_document_id = lesson.document_id
+        session.temp_content_chapter_id = lesson.chapter_id
+        session.temp_lesson_document_key = lesson.document_key
+        session.temp_lesson_book_title = lesson.book_title
+        session.temp_lesson_school_name = lesson.school_name
+        session.temp_lesson_chapter_title = lesson.chapter_title
+        session.temp_lesson_section_title = lesson.section_title
 
     def _lesson_day_reply(
         self,
@@ -1087,9 +1220,9 @@ class ConversationService:
                 )
 
             self.session_repo.clear_temp_lesson(session)
-            session.current_state = ConversationState.NEW_LESSON_TOPIC.value
+            session.current_state = ConversationState.NEW_LESSON_GRADE.value
             self.session_repo.save(session)
-            return self._reply(self._text(language, "new_lesson_topic_prompt"), ConversationState.NEW_LESSON_TOPIC)
+            return self._reply(self._new_lesson_grade_prompt(language), ConversationState.NEW_LESSON_GRADE)
 
         if choice in {"2", "all lessons", "menu_all_lessons", "sab lessons", "सभी पाठ"}:
             if not teacher:
@@ -1287,9 +1420,7 @@ class ConversationService:
     def _handle_new_lesson_topic(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
         language = self._teacher_language(teacher, whatsapp_number)
-        if not text:
-            log_event(logger, "validation_failure", field="topic", value=text)
-            return self._reply(self._text(language, "new_lesson_topic_invalid"), ConversationState.NEW_LESSON_TOPIC)
+        choice = normalize_choice(text)
 
         if not teacher:
             session.current_state = ConversationState.PROFILE_NAME.value
@@ -1307,16 +1438,62 @@ class ConversationService:
                 outbound=school_reply.outbound,
             )
 
-        # Keep the exact teacher-entered topic. The older flow asked grade, subject,
-        # and class duration before generation; these values now drive DB matching,
-        # prompt metadata, the visible lesson header, and saved lesson_plan fields.
-        session.temp_topic = text.strip()
-        session.temp_profile_grade = None
-        session.temp_profile_subject = None
+        lessons = self._lesson_topic_list_for_session(session, teacher)
+        if choice.startswith("lesson_topic_page:"):
+            raw_page = choice.split(":", 1)[1].strip()
+            page = int(raw_page) if raw_page.isdigit() else 0
+            return self._lesson_topic_reply(lessons=lessons, language=language, page=page)
+
+        if not text:
+            log_event(logger, "validation_failure", field="lesson_topic_choice", value=text)
+            return self._reply(
+                f"{self._text(language, 'new_lesson_topic_invalid')}\n\n{self._text(language, 'new_lesson_topic_prompt')}",
+                ConversationState.NEW_LESSON_TOPIC,
+                outbound=self._lesson_topic_reply(lessons=lessons, language=language).outbound,
+            )
+
+        lesson_match = self._resolve_lesson_topic_choice(
+            choice=choice,
+            text=text,
+            lessons=lessons,
+            teacher=teacher,
+            session=session,
+        )
+        if not lesson_match:
+            log_event(
+                logger,
+                "embedding_lesson_topic_choice_invalid",
+                teacher_id=teacher.id,
+                school_name=school_name,
+                grade=session.temp_profile_grade,
+                subject=session.temp_profile_subject,
+                value=text,
+                option_count=len(lessons),
+            )
+            topic_reply = self._lesson_topic_reply(lessons=lessons, language=language)
+            return self._reply(
+                f"{self._text(language, 'new_lesson_topic_invalid')}\n\n{topic_reply.reply}",
+                ConversationState.NEW_LESSON_TOPIC,
+                outbound=topic_reply.outbound,
+            )
+
+        self._store_selected_lesson_topic(session, lesson_match)
+        session.temp_content_subsection_id = None
         session.temp_duration_minutes = None
-        session.current_state = ConversationState.NEW_LESSON_GRADE.value
+        session.current_state = ConversationState.NEW_LESSON_DURATION.value
         self.session_repo.save(session)
-        return self._reply(self._new_lesson_grade_prompt(language), ConversationState.NEW_LESSON_GRADE)
+
+        log_event(
+            logger,
+            "lesson_topic_selected_from_embedding_list",
+            teacher_id=teacher.id,
+            school_name=school_name,
+            grade=session.temp_profile_grade,
+            subject=session.temp_profile_subject,
+            chapter_id=lesson_match.chapter_id,
+            title=lesson_match.title,
+        )
+        return self._reply(self._text(language, "duration_prompt"), ConversationState.NEW_LESSON_DURATION)
 
     def _handle_new_lesson_day(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
@@ -1423,6 +1600,22 @@ class ConversationService:
         if not text:
             return self._reply(self._new_lesson_subject_prompt(language), ConversationState.NEW_LESSON_SUBJECT)
 
+        if not teacher:
+            session.current_state = ConversationState.PROFILE_NAME.value
+            self.session_repo.save(session)
+            return self._reply(self._text(language, "new_lesson_without_profile"), ConversationState.PROFILE_NAME)
+
+        school_name = (getattr(teacher, "school_name", None) or "").strip()
+        if not school_name:
+            session.current_state = ConversationState.PROFILE_SCHOOL.value
+            self.session_repo.save(session)
+            school_reply = self._profile_school_edit_prompt(teacher, language)
+            return self._reply(
+                f"{self._text(language, 'new_lesson_no_school')}\n\n{school_reply.reply}",
+                ConversationState.PROFILE_SCHOOL,
+                outbound=school_reply.outbound,
+            )
+
         lesson_grade = session.temp_profile_grade or ""
         normalized_subject = self.subject_resolver.resolve(text, language=language)
         subject_error = self._localize_validation_error(validate_profile_subject(normalized_subject, lesson_grade, self.settings), language)
@@ -1434,9 +1627,22 @@ class ConversationService:
             )
 
         session.temp_profile_subject = normalized_subject
-        session.current_state = ConversationState.NEW_LESSON_DURATION.value
+        session.temp_topic = None
+        session.temp_content_document_id = None
+        session.temp_content_chapter_id = None
+        session.temp_content_subsection_id = None
+
+        lessons = self._lesson_topic_list_for_session(session, teacher)
+        if not lessons:
+            self.session_repo.save(session)
+            return self._reply(
+                f"{self._text(language, 'lesson_topic_empty', school_name=school_name, grade=lesson_grade, subject=normalized_subject)}\n\n{self._new_lesson_subject_prompt(language)}",
+                ConversationState.NEW_LESSON_SUBJECT,
+            )
+
+        session.current_state = ConversationState.NEW_LESSON_TOPIC.value
         self.session_repo.save(session)
-        return self._reply(self._text(language, "duration_prompt"), ConversationState.NEW_LESSON_DURATION)
+        return self._lesson_topic_reply(lessons=lessons, language=language)
 
     def _handle_new_lesson_duration(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
@@ -1467,12 +1673,16 @@ class ConversationService:
         topic = (session.temp_topic or "").strip()
         session.temp_duration_minutes = duration
 
-        lesson_match = self.embedding_content_repo.find_lesson_match(
-            school_name=school_name,
-            grade=lesson_grade,
-            subject=lesson_subject,
-            topic=topic,
-        )
+        lesson_match = None
+        if session.temp_content_chapter_id:
+            lesson_match = self.embedding_content_repo.get_lesson_by_chapter_id(session.temp_content_chapter_id)
+        if not lesson_match and topic:
+            lesson_match = self.embedding_content_repo.find_lesson_match(
+                school_name=school_name,
+                grade=lesson_grade,
+                subject=lesson_subject,
+                topic=topic,
+            )
         if not lesson_match:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "lesson_no_match", topic=topic), language)

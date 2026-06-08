@@ -222,6 +222,48 @@ class EmbeddingContentRepository:
         rows = self._candidate_lessons(chapter_id=chapter_id)
         return rows[0] if rows else None
 
+    def list_lessons_for_selection(
+        self,
+        *,
+        school_name: str | None,
+        grade: str | None,
+        subject: str | None,
+    ) -> list[EmbeddingLessonMatch]:
+        """Return ordered lessons/sections for the teacher's school + grade + subject.
+
+        This supports the WhatsApp New Lesson flow after the teacher enters grade
+        and subject. It mirrors the intended production lookup:
+        embeddings_documents.school_name + subject + Class{grade}, ordered by
+        numeric section/chapter number.
+        """
+        lessons = self._candidate_lessons(school_name=school_name, grade=grade, subject=subject)
+        if not lessons:
+            return []
+
+        section_numbered = [lesson for lesson in lessons if self._is_numeric_lesson_number(lesson.section_number)]
+        chapter_numbered = [lesson for lesson in lessons if self._is_numeric_lesson_number(lesson.chapter_number)]
+        ordered = section_numbered or chapter_numbered or lessons
+        ordered.sort(
+            key=lambda lesson: (
+                self._numeric_lesson_number(lesson.section_number)
+                if self._is_numeric_lesson_number(lesson.section_number)
+                else self._numeric_lesson_number(lesson.chapter_number)
+                if self._is_numeric_lesson_number(lesson.chapter_number)
+                else float("inf"),
+                lesson.pdf_start_page or 999999,
+                lesson.title.casefold(),
+            )
+        )
+        log_event(
+            logger,
+            "embedding_lesson_selection_list",
+            school_name=school_name,
+            grade=grade,
+            subject=subject,
+            count=len(ordered),
+        )
+        return ordered
+
     def list_subsections_for_lesson(self, lesson: EmbeddingLessonMatch) -> list[EmbeddingSubsection]:
         where_parts = ["s.document_id = CAST(:document_id AS uuid)" if not self.settings.database_is_sqlite else "s.document_id = :document_id"]
         params: dict[str, Any] = {"document_id": lesson.document_id}
@@ -504,3 +546,12 @@ class EmbeddingContentRepository:
         if normalized in {"math", "maths", "mathematics"}:
             variants.update({"math", "maths", "mathematics"})
         return sorted(item for item in variants if item)
+
+    def _is_numeric_lesson_number(self, value: str | None) -> bool:
+        return bool(re.fullmatch(r"\d+(?:\.\d+)?", (value or "").strip()))
+
+    def _numeric_lesson_number(self, value: str | None) -> float:
+        try:
+            return float((value or "").strip())
+        except ValueError:
+            return float("inf")
