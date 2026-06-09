@@ -121,6 +121,7 @@ class PdfContentLessonService:
         )
         normalized_lesson_text = normalize_lesson_output(raw_lesson_text)
         whatsapp_lesson_text = format_whatsapp_lesson(normalized_lesson_text)
+        whatsapp_lesson_text = self._strip_trailing_lesson_conclusion(whatsapp_lesson_text)
         whatsapp_lesson_text = self._ensure_day_lesson_header_metadata(
             whatsapp_lesson_text,
             lesson=lesson,
@@ -367,12 +368,13 @@ class PdfContentLessonService:
         day_title = f"Day {day_number}"
         day_content = subsection.text.strip()
 
-        system_prompt = (
-            "You are a helpful teaching assistant for resource-limited classrooms. "
-            "Generate a detailed lesson plan for exactly one day using only the supplied day/subsection content."
-        )
+        # Keep this prompt intentionally close to PlanB's day_detailed prompt.
+        # Teacher Helper still preserves the existing teacher inputs
+        # (grade, subject, chapter, book, and class duration), but the core
+        # instruction/order mirrors PlanB so OpenAI output is less likely to
+        # add extra commentary.
+        system_prompt = "You are generating a DETAILED LESSON PLAN for ONE DAY only."
         user_prompt = (
-            "You are a helpful teaching assistant for resource-limited classrooms.\n"
             "You are generating a DETAILED LESSON PLAN for ONE DAY only.\n\n"
             f"This is {day_title}.\n\n"
             f"Grade: {grade}\n"
@@ -431,8 +433,9 @@ class PdfContentLessonService:
             "- Refer to the book pages provided.\n"
             "- Use only resource-limited materials.\n"
             f"- Keep the whole lesson within {requested_duration} minutes.\n"
-            "- Keep activities realistic for a low-resource classroom.\n"
-            "- Do not include any source block or YouTube link.\n\n"
+            "- Do not include any source block or YouTube link.\n"
+            "- End the response immediately after the Homework section.\n"
+            "- Do not add any final note, summary, conclusion, or closing sentence after Homework.\n\n"
             f"--- {day_title.upper()} CONTENT START ---\n"
             f"{day_content}\n"
             f"--- {day_title.upper()} CONTENT END ---"
@@ -451,6 +454,44 @@ class PdfContentLessonService:
                 "duration_minutes": requested_duration,
             },
         )
+
+    def _strip_trailing_lesson_conclusion(self, text: str) -> str:
+        """Remove generic LLM-added closing sentences after Homework.
+
+        PlanB does not have a special conclusion section. Teacher Helper should
+        therefore end at the Homework section too. This keeps the existing
+        teacher-question flow unchanged while making the final output closer to
+        PlanB and preventing generic lines like:
+        "This lesson plan is designed to..."
+        """
+        if not text:
+            return text
+
+        lines = text.rstrip().splitlines()
+        while lines and not lines[-1].strip():
+            lines.pop()
+
+        generic_patterns = [
+            r"^this lesson plan is designed to\b",
+            r"^this lesson is designed to\b",
+            r"^this lesson will engage\b",
+            r"^overall,\s*this lesson\b",
+            r"^in conclusion\b",
+            r"^to conclude\b",
+            r"^finally,\s*this lesson\b",
+        ]
+
+        # Remove one or more generic trailing closing lines.
+        while lines:
+            last = lines[-1].strip()
+            if any(re.match(pattern, last, flags=re.IGNORECASE) for pattern in generic_patterns):
+                lines.pop()
+                while lines and not lines[-1].strip():
+                    lines.pop()
+                continue
+            break
+
+        return "\n".join(lines).rstrip()
 
     def _safe_lesson_text(self, value: str) -> str:
         text = (value or "").strip()
