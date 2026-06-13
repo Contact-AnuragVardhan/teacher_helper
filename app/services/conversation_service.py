@@ -47,14 +47,14 @@ TEXT: dict[str, dict[str, str]] = {
         "all_lessons_next": "अगला पेज",
         "all_lessons_previous": "पिछला पेज",
         "new_lesson_without_profile": "कृपया पहले अपनी प्रोफ़ाइल पूरी करें।\nआपका नाम क्या है?",
-        "new_lesson_topic_prompt": "कृपया नीचे दी गई सूची से lesson/chapter चुनें।",
-        "new_lesson_topic_invalid": "कृपया सूची से सही lesson/chapter चुनें।",
-        "lesson_topic_header": "Lesson चुनें",
-        "lesson_topic_body": "Grade और subject के आधार पर lesson/chapter चुनें। Page {page}/{total_pages}.",
-        "lesson_topic_button": "Lessons",
-        "lesson_topic_section": "Lessons",
-        "lesson_topic_footer": "नीचे एक lesson/chapter टैप करें।",
-        "lesson_topic_empty": "{school_name} में Class {grade} / {subject} के लिए कोई lesson/chapter नहीं मिला। कृपया subject फिर से लिखें या main menu पर वापस जाएँ।",
+        "new_lesson_topic_prompt": "कृपया नीचे दी गई सूची से अध्याय चुनें।",
+        "new_lesson_topic_invalid": "कृपया सूची से सही अध्याय चुनें।",
+        "lesson_topic_header": "अध्याय चुनें",
+        "lesson_topic_body": "ग्रेड और विषय के आधार पर अध्याय चुनें। पेज {page}/{total_pages}.",
+        "lesson_topic_button": "अध्याय",
+        "lesson_topic_section": "अध्याय",
+        "lesson_topic_footer": "नीचे एक अध्याय टैप करें।",
+        "lesson_topic_empty": "{school_name} में कक्षा {grade} / {subject} के लिए कोई अध्याय नहीं मिला। कृपया विषय फिर से लिखें या मुख्य मेनू पर वापस जाएँ।",
         "lesson_topic_next": "अगला पेज",
         "lesson_topic_previous": "पिछला पेज",
         "new_lesson_grade_prompt": "इस पाठ के लिए ग्रेड/कक्षा लिखें। उदाहरण: 1, 2, 3",
@@ -89,14 +89,17 @@ TEXT: dict[str, dict[str, str]] = {
         "school_list_section": "Schools",
         "school_list_footer": "नीचे एक स्कूल टैप करें।",
         "new_lesson_no_school": "पाठ योजना बनाने से पहले कृपया प्रोफ़ाइल अपडेट करके स्कूल चुनें।",
-        "lesson_no_match": "इसके लिए कोई lesson/section नहीं मिला: {topic}\n\nकृपया किताब का exact lesson, section या chapter title लिखें।",
-        "lesson_summary_intro": "मुझे यह lesson/section मिला:\n{title}\nBook Pages: {pages}\n\nSimple summary:\n{summary}\n\nअब detailed lesson plan के लिए day/subsection चुनें।",
-        "lesson_day_header": "Day चुनें",
-        "lesson_day_body": "एक day/subsection चुनें।",
-        "lesson_day_button": "Lesson Days",
-        "lesson_day_section": "Days",
-        "lesson_day_footer": "नीचे एक day टैप करें।",
-        "lesson_day_invalid": "कृपया सूची से सही day/subsection चुनें।",
+        "lesson_no_match": "इसके लिए कोई अध्याय नहीं मिला: {topic}\n\nकृपया किताब का सही chapter title लिखें।",
+        "lesson_summary_intro": "मुझे यह अध्याय मिला:\n{title}\nपुस्तक पेज: {pages}\n\nसरल सारांश:\n{summary}\n\nअब detailed पाठ योजना के लिए दिन चुनें।",
+        "lesson_day_header": "दिन चुनें",
+        "lesson_day_body": "एक दिन चुनें।",
+        "lesson_day_button": "दिन",
+        "lesson_day_section": "दिन",
+        "day_label": "दिन {number}",
+        "chapter_number_label": "अध्याय {number}",
+        "pages_label": "पेज {pages}",
+        "lesson_day_footer": "नीचे एक दिन टैप करें।",
+        "lesson_day_invalid": "कृपया सूची से सही दिन चुनें।",
         "profile_grade_prompt": "आपकी डिफ़ॉल्ट ग्रेड/कक्षा क्या है? उदाहरण: 1, 2, 3",
         "profile_subject_prompt": "आप कौन सा विषय पढ़ाते हैं? उदाहरण: गणित",
         "profile_language_prompt": "कृपया पसंदीदा भाषा लिखें। विकल्प: {options}",
@@ -159,14 +162,14 @@ TEXT: dict[str, dict[str, str]] = {
         "all_lessons_next": "Next Page",
         "all_lessons_previous": "Previous Page",
         "new_lesson_without_profile": "Please complete your profile first.\nWhat is your name?",
-        "new_lesson_topic_prompt": "Please select the lesson/chapter you would like to teach from the list below.",
-        "new_lesson_topic_invalid": "Please select a valid lesson/chapter from the list below.",
-        "lesson_topic_header": "Choose Lesson",
-        "lesson_topic_body": "Select a lesson/chapter for the grade and subject you entered. Page {page}/{total_pages}.",
-        "lesson_topic_button": "Lessons",
-        "lesson_topic_section": "Lessons",
-        "lesson_topic_footer": "Tap one lesson/chapter below.",
-        "lesson_topic_empty": "No lesson/chapter was found for {school_name}, Class {grade}, {subject}. Please enter the subject again, or send Main Menu to go back.",
+        "new_lesson_topic_prompt": "Please select the chapter you would like to teach from the list below.",
+        "new_lesson_topic_invalid": "Please select a valid chapter from the list below.",
+        "lesson_topic_header": "Choose Chapter",
+        "lesson_topic_body": "Select a chapter for the grade and subject you entered. Page {page}/{total_pages}.",
+        "lesson_topic_button": "Chapters",
+        "lesson_topic_section": "Chapters",
+        "lesson_topic_footer": "Tap one chapter below.",
+        "lesson_topic_empty": "No chapter was found for {school_name}, Class {grade}, {subject}. Please enter the subject again, or send Main Menu to go back.",
         "lesson_topic_next": "Next Page",
         "lesson_topic_previous": "Previous Page",
         "new_lesson_grade_prompt": "Please enter the grade/class for this lesson. Example: 1, 2, 3",
@@ -201,14 +204,17 @@ TEXT: dict[str, dict[str, str]] = {
         "school_list_section": "Schools",
         "school_list_footer": "Tap one school below.",
         "new_lesson_no_school": "Please update your profile and choose your school before creating a lesson plan.",
-        "lesson_no_match": "No matching lesson/section was found for: {topic}\n\nPlease type the exact lesson, section, or chapter title from the book.",
-        "lesson_summary_intro": "I found this lesson/section:\n{title}\nBook Pages: {pages}\n\nSimple summary:\n{summary}\n\nNow choose the lesson day/subsection for the detailed lesson plan.",
+        "lesson_no_match": "No matching chapter was found for: {topic}\n\nPlease type the exact chapter title from the book.",
+        "lesson_summary_intro": "I found this chapter:\n{title}\nBook Pages: {pages}\n\nSimple summary:\n{summary}\n\nNow choose the day for the detailed lesson plan.",
         "lesson_day_header": "Choose Day",
-        "lesson_day_body": "Select one day/subsection.",
-        "lesson_day_button": "Lesson Days",
+        "lesson_day_body": "Select one day.",
+        "lesson_day_button": "Days",
         "lesson_day_section": "Days",
+        "day_label": "Day {number}",
+        "chapter_number_label": "Chapter {number}",
+        "pages_label": "Pages {pages}",
         "lesson_day_footer": "Tap one day below.",
-        "lesson_day_invalid": "Please choose a valid day/subsection from the list.",
+        "lesson_day_invalid": "Please choose a valid day from the list.",
         "profile_grade_prompt": "What is your default grade/class? Example: 1, 2, 3",
         "profile_subject_prompt": "What subject do you teach? Example: English",
         "profile_language_prompt": "Please enter preferred language. Options: {options}",
@@ -271,14 +277,14 @@ TEXT: dict[str, dict[str, str]] = {
         "all_lessons_next": "Next Page",
         "all_lessons_previous": "Previous Page",
         "new_lesson_without_profile": "Please pehle apni profile complete karein.\nAapka naam kya hai?",
-        "new_lesson_topic_prompt": "Please neeche list se lesson/chapter choose karein.",
-        "new_lesson_topic_invalid": "Please list se valid lesson/chapter choose karein.",
-        "lesson_topic_header": "Choose Lesson",
-        "lesson_topic_body": "Entered grade aur subject ke liye lesson/chapter choose karein. Page {page}/{total_pages}.",
-        "lesson_topic_button": "Lessons",
-        "lesson_topic_section": "Lessons",
-        "lesson_topic_footer": "Neeche ek lesson/chapter tap karein.",
-        "lesson_topic_empty": "{school_name} mein Class {grade} / {subject} ke liye koi lesson/chapter nahi mila. Please subject phir se likhein ya Main Menu bhejein.",
+        "new_lesson_topic_prompt": "Please neeche list se chapter choose karein.",
+        "new_lesson_topic_invalid": "Please list se valid chapter choose karein.",
+        "lesson_topic_header": "Choose Chapter",
+        "lesson_topic_body": "Entered grade aur subject ke liye chapter choose karein. Page {page}/{total_pages}.",
+        "lesson_topic_button": "Chapters",
+        "lesson_topic_section": "Chapters",
+        "lesson_topic_footer": "Neeche ek chapter tap karein.",
+        "lesson_topic_empty": "{school_name} mein Class {grade} / {subject} ke liye koi chapter nahi mila. Please subject phir se likhein ya Main Menu bhejein.",
         "lesson_topic_next": "Next Page",
         "lesson_topic_previous": "Previous Page",
         "new_lesson_grade_prompt": "Is lesson ke liye grade/class likhein. Example: 1, 2, 3",
@@ -313,14 +319,17 @@ TEXT: dict[str, dict[str, str]] = {
         "school_list_section": "Schools",
         "school_list_footer": "Neeche ek school tap karein.",
         "new_lesson_no_school": "Lesson plan create karne se pehle please profile update karke school choose karein.",
-        "lesson_no_match": "Is topic ke liye matching lesson/section nahi mila: {topic}\n\nPlease book ka exact lesson, section, ya chapter title type karein.",
-        "lesson_summary_intro": "Mujhe yeh lesson/section mila:\n{title}\nBook Pages: {pages}\n\nSimple summary:\n{summary}\n\nAb detailed lesson plan ke liye day/subsection choose karein.",
+        "lesson_no_match": "Is topic ke liye matching chapter nahi mila: {topic}\n\nPlease book ka exact chapter title type karein.",
+        "lesson_summary_intro": "Mujhe yeh chapter mila:\n{title}\nBook Pages: {pages}\n\nSimple summary:\n{summary}\n\nAb detailed lesson plan ke liye day choose karein.",
         "lesson_day_header": "Choose Day",
-        "lesson_day_body": "Ek day/subsection select karein.",
-        "lesson_day_button": "Lesson Days",
+        "lesson_day_body": "Ek day select karein.",
+        "lesson_day_button": "Days",
         "lesson_day_section": "Days",
+        "day_label": "Day {number}",
+        "chapter_number_label": "Chapter {number}",
+        "pages_label": "Pages {pages}",
         "lesson_day_footer": "Neeche ek day tap karein.",
-        "lesson_day_invalid": "Please list se valid day/subsection choose karein.",
+        "lesson_day_invalid": "Please list se valid day choose karein.",
         "profile_grade_prompt": "Aapki default grade/class kya hai? Example: 1, 2, 3",
         "profile_subject_prompt": "Aap kaunsa subject padhate hain? Example: English",
         "profile_language_prompt": "Please preferred language likhein. Options: {options}",
@@ -711,13 +720,13 @@ class ConversationService:
             title = lesson.title or f"Lesson {index}"
             description_parts: list[str] = []
             if lesson.section_number:
-                description_parts.append(f"Section {lesson.section_number}")
+                description_parts.append(self._text(language, "chapter_number_label", number=lesson.section_number))
             elif lesson.chapter_number:
-                description_parts.append(f"Chapter {lesson.chapter_number}")
+                description_parts.append(self._text(language, "chapter_number_label", number=lesson.chapter_number))
             if lesson.book_title:
                 description_parts.append(lesson.book_title)
             if lesson.display_pages != "Not available":
-                description_parts.append(f"Pages {lesson.display_pages}")
+                description_parts.append(self._text(language, "pages_label", pages=lesson.display_pages))
             rows.append(
                 {
                     "id": f"lesson_topic:{lesson.chapter_id}",
@@ -811,10 +820,10 @@ class ConversationService:
     ) -> ConversationReply:
         rows: list[dict[str, str]] = []
         for index, subsection in enumerate(subsections[:9], start=1):
-            day_label = f"Day {index}"
+            day_label = self._text(language, "day_label", number=index)
             description_parts = [subsection.title]
             if subsection.display_pages != "Not available":
-                description_parts.append(f"Pages {subsection.display_pages}")
+                description_parts.append(self._text(language, "pages_label", pages=subsection.display_pages))
             rows.append(
                 {
                     "id": f"lesson_day:{subsection.id}",
@@ -1005,15 +1014,15 @@ class ConversationService:
             },
         )
 
-    def _lesson_day_label_for_summary(self, item: AccessibleLessonSummary) -> str | None:
+    def _lesson_day_label_for_summary(self, item: AccessibleLessonSummary, language: str) -> str | None:
+        if item.day_number:
+            return self._text(language, "day_label", number=item.day_number)
         if item.day_title:
             return item.day_title.strip()
-        if item.day_number:
-            return f"Day {item.day_number}"
         return None
 
-    def _lesson_option_title(self, item: AccessibleLessonSummary) -> str:
-        day_label = self._lesson_day_label_for_summary(item)
+    def _lesson_option_title(self, item: AccessibleLessonSummary, language: str) -> str:
+        day_label = self._lesson_day_label_for_summary(item, language)
         title = item.display_title or item.lesson_name
         if not day_label:
             return title
@@ -1023,9 +1032,9 @@ class ConversationService:
         base = title[:max_title_len].rstrip()
         return f"{base} {short_day}".strip()
 
-    def _lesson_option_description(self, item: AccessibleLessonSummary) -> str:
+    def _lesson_option_description(self, item: AccessibleLessonSummary, language: str) -> str:
         parts: list[str] = []
-        day_label = self._lesson_day_label_for_summary(item)
+        day_label = self._lesson_day_label_for_summary(item, language)
         if day_label:
             parts.append(day_label)
         if item.subsection_title and item.subsection_title != day_label:
@@ -1033,7 +1042,7 @@ class ConversationService:
         if item.book_title:
             parts.append(item.book_title)
         if item.book_pages:
-            parts.append(f"Pages {item.book_pages}")
+            parts.append(self._text(language, "pages_label", pages=item.book_pages))
         return " | ".join(part for part in parts if part)
 
     def _all_lessons_interactive_reply(
@@ -1054,8 +1063,8 @@ class ConversationService:
 
         rows = []
         for item_summary in page_lessons:
-            row_title = self._lesson_option_title(item_summary)
-            row_description = self._lesson_option_description(item_summary)
+            row_title = self._lesson_option_title(item_summary, language)
+            row_description = self._lesson_option_description(item_summary, language)
             item = {
                 "id": f"lesson_id:{item_summary.lesson_id}",
                 "title": row_title[:24],
