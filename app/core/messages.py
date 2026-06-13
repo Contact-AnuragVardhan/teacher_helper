@@ -31,8 +31,8 @@ NEW_LESSON_WITHOUT_PROFILE = (
     "Please complete your profile first.\n"
     "What is your name?"
 )
-NEW_LESSON_TOPIC_PROMPT = "Please select the lesson/chapter you would like to teach from the list below."
-NEW_LESSON_TOPIC_INVALID = "Please select a valid lesson/chapter from the list below."
+NEW_LESSON_TOPIC_PROMPT = "Please select the chapter you would like to teach from the list below."
+NEW_LESSON_TOPIC_INVALID = "Please select a valid chapter from the list below."
 NEW_LESSON_SAVE_PROMPT_PREFIX = "Here is your generated lesson plan:"
 NEW_LESSON_NAME_PROMPT = 'Please enter a name for this lesson. Example: "Jhansi Ki Rani"'
 NEW_LESSON_NAME_INVALID = 'Lesson name cannot be blank. Please enter a lesson name, for example "Jhansi Ki Rani".'

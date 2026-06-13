@@ -7,6 +7,7 @@ from openai import OpenAI
 from sqlalchemy.orm import Session
 
 from app.core.config import Settings, get_settings
+from app.core.language import language_key
 from app.core.logging import get_logger, log_event
 from app.models.teacher_profile import TeacherProfile
 from app.repositories.embedding_content_repository import EmbeddingLessonMatch, EmbeddingSubsection
@@ -43,7 +44,10 @@ class PdfContentLessonService:
     ) -> tuple[str, str]:
         prompt = self._section_summary_prompt(lesson=lesson, teacher=teacher, grade=grade, subject=subject, duration_minutes=duration_minutes)
         self._log_section_db_text(lesson=lesson, teacher=teacher, grade=grade, subject=subject, duration_minutes=duration_minutes)
-        fallback = self._fallback_section_summary(lesson)
+        fallback = self._fallback_section_summary(
+            lesson,
+            language=getattr(teacher, "preferred_language", "English"),
+        )
         raw_summary, provider_used = self._generate_or_fallback(
             prompt,
             fallback=fallback,
@@ -323,27 +327,27 @@ class PdfContentLessonService:
         subject_value = subject_display_name(normalize_subject(subject or lesson.subject or teacher.default_subject), language=getattr(teacher, "preferred_language", "English"))
         system_prompt = (
             "You are a helpful teaching assistant for resource-limited classrooms. "
-            "You summarize textbook lesson/section content for a teacher before they choose a day/subsection."
+            "You summarize textbook chapter content for a teacher before they choose a day."
         )
         user_prompt = (
-            "Generate a simple lesson/section summary for the teacher.\n\n"
+            "Generate a simple chapter summary for the teacher.\n\n"
             f"School: {getattr(teacher, 'school_name', '') or lesson.school_name or ''}\n"
             f"Grade: {grade_value}\n"
             f"Subject: {subject_value}\n"
             f"Class Duration: {duration_minutes or 0} minutes\n"
             f"Book: {lesson.book_title or ''}\n"
-            f"Lesson/Section: {lesson.title}\n"
+            f"Chapter: {lesson.title}\n"
             f"Book pages: {lesson.display_pages}\n\n"
             "Rules:\n"
-            "- Use ONLY the supplied lesson/section content.\n"
+            "- Use ONLY the supplied chapter content.\n"
             "- Keep it WhatsApp friendly.\n"
             "- Do not create a lesson plan yet.\n"
             "- Write 5 to 7 short bullets.\n"
             "- Mention the main idea, important vocabulary/concepts, and what students will practice.\n"
             "- No markdown tables. No HTML. No LaTeX.\n\n"
-            "--- LESSON/SECTION CONTENT START ---\n"
+            "--- CHAPTER CONTENT START ---\n"
             f"{lesson_text}\n"
-            "--- LESSON/SECTION CONTENT END ---"
+            "--- CHAPTER CONTENT END ---"
         )
         return PromptBundle(system_prompt=system_prompt, user_prompt=user_prompt, metadata={"task": "section_summary", "grade": grade_value, "subject": subject_value, "duration_minutes": duration_minutes})
 
@@ -500,19 +504,44 @@ class PdfContentLessonService:
         # Summary generation can work from a long but bounded excerpt; the day lesson prompt still receives exact day text.
         return text[:24000].rsplit("\n", 1)[0]
 
-    def _fallback_section_summary(self, lesson: EmbeddingLessonMatch) -> str:
+    def _fallback_section_summary(self, lesson: EmbeddingLessonMatch, language: str = "English") -> str:
         text = re.sub(r"\s+", " ", (lesson.text or "").strip())
         preview = text[:700].strip()
+        days_word = "day" if int(lesson.subsection_count or 0) == 1 else "days"
+        lang = language_key(language)
         if preview:
             preview = preview + ("..." if len(text) > 700 else "")
         else:
-            preview = "Summary is not available because no lesson/section text was found in the embeddings tables."
+            if lang == "hindi":
+                preview = "सारांश उपलब्ध नहीं है क्योंकि embeddings tables में chapter text नहीं मिला।"
+            elif lang == "hinglish":
+                preview = "Summary available nahi hai kyunki embeddings tables mein chapter text nahi mila."
+            else:
+                preview = "Summary is not available because no chapter text was found in the embeddings tables."
+        if lang == "hindi":
+            return (
+                f"अध्याय सारांश\n"
+                f"अध्याय: {lesson.title}\n"
+                f"Book Pages: {lesson.display_pages}\n\n"
+                f"- यह अध्याय textbook content database से match हुआ है।\n"
+                f"- इसमें {lesson.subsection_count} दिन हैं।\n"
+                f"- Preview: {preview}"
+            )
+        if lang == "hinglish":
+            return (
+                f"Chapter Summary\n"
+                f"Chapter: {lesson.title}\n"
+                f"Book Pages: {lesson.display_pages}\n\n"
+                f"- Yeh chapter textbook content database se match hua hai.\n"
+                f"- Ismein {lesson.subsection_count} {days_word} hain.\n"
+                f"- Preview: {preview}"
+            )
         return (
-            f"Lesson/Section Summary\n"
+            f"Chapter Summary\n"
             f"Chapter: {lesson.title}\n"
             f"Book Pages: {lesson.display_pages}\n\n"
-            f"- This section is matched from the textbook content database.\n"
-            f"- It has {lesson.subsection_count} day/subsection part(s).\n"
+            f"- This chapter is matched from the textbook content database.\n"
+            f"- It has {lesson.subsection_count} {days_word}.\n"
             f"- Preview: {preview}"
         )
 
