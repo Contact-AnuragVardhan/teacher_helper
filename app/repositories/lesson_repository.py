@@ -236,8 +236,8 @@ class LessonRepository:
         book_pages: str | None = None,
         pdf_start_page: int | None = None,
         pdf_end_page: int | None = None,
-        printed_start_page: int | None = None,
-        printed_end_page: int | None = None,
+        printed_start_page: str | None = None,
+        printed_end_page: str | None = None,
         resource_profile: str | None = None,
         format_profile: str | None = None,
     ) -> LessonPlan:
@@ -317,8 +317,8 @@ class LessonRepository:
         book_pages: str | None = None,
         pdf_start_page: int | None = None,
         pdf_end_page: int | None = None,
-        printed_start_page: int | None = None,
-        printed_end_page: int | None = None,
+        printed_start_page: str | None = None,
+        printed_end_page: str | None = None,
         resource_profile: str | None = None,
         format_profile: str | None = None,
     ) -> LessonPlan:
@@ -385,8 +385,8 @@ class LessonRepository:
         book_pages: str | None = None,
         pdf_start_page: int | None = None,
         pdf_end_page: int | None = None,
-        printed_start_page: int | None = None,
-        printed_end_page: int | None = None,
+        printed_start_page: str | None = None,
+        printed_end_page: str | None = None,
         resource_profile: str | None = None,
         format_profile: str | None = None,
     ) -> LessonPlan | None:
