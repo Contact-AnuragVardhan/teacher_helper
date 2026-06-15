@@ -28,8 +28,8 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
         "temp_lesson_book_pages": "VARCHAR(100)",
         "temp_lesson_pdf_start_page": "INTEGER",
         "temp_lesson_pdf_end_page": "INTEGER",
-        "temp_lesson_printed_start_page": "INTEGER",
-        "temp_lesson_printed_end_page": "INTEGER",
+        "temp_lesson_printed_start_page": "VARCHAR(100)",
+        "temp_lesson_printed_end_page": "VARCHAR(100)",
         "temp_lesson_document_key": "VARCHAR(255)",
         "temp_lesson_school_name": "VARCHAR(255)",
         "temp_lesson_summary": "TEXT",
@@ -50,20 +50,47 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
         "book_pages": "VARCHAR(100)",
         "pdf_start_page": "INTEGER",
         "pdf_end_page": "INTEGER",
-        "printed_start_page": "INTEGER",
-        "printed_end_page": "INTEGER",
+        "printed_start_page": "VARCHAR(100)",
+        "printed_end_page": "VARCHAR(100)",
         "resource_profile": "VARCHAR(100)",
         "format_profile": "VARCHAR(100)",
     },
 }
 
+_TEXT_PAGE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "session_state": (
+        "temp_lesson_printed_start_page",
+        "temp_lesson_printed_end_page",
+    ),
+    "lesson_plan": (
+        "printed_start_page",
+        "printed_end_page",
+    ),
+}
+
+_TEXT_TYPE_DDL = "VARCHAR(100)"
+_NUMERIC_TYPE_MARKERS = (
+    "integer",
+    "bigint",
+    "smallint",
+    "numeric",
+    "decimal",
+    "double precision",
+    "real",
+)
+
 
 def ensure_runtime_columns(engine: Engine) -> None:
-    """Add lightweight backward-compatible columns for already-created app DB tables.
+    """Add/repair lightweight backward-compatible columns for already-created app DB tables.
 
     SQLAlchemy create_all() creates new tables with the latest model columns, but it does not
     alter existing production tables. This keeps older Teacher Helper deployments compatible
     without requiring Alembic for these small additive changes.
+
+    Printed book pages are text because some books use values like "2/4" and "2/9".
+    If an older Teacher Helper database still has these app-side columns as integers, this
+    function converts them to VARCHAR at startup so lesson generation does not fail while
+    saving session state or lesson plans.
     """
     inspector = inspect(engine)
     existing_tables = set(inspector.get_table_names())
@@ -74,6 +101,7 @@ def ensure_runtime_columns(engine: Engine) -> None:
         for table_name, columns in _RUNTIME_COLUMNS.items():
             if table_name not in existing_tables:
                 continue
+
             existing_columns = {column["name"] for column in inspector.get_columns(table_name)}
             for column_name, ddl_type in columns.items():
                 if column_name in existing_columns:
@@ -83,3 +111,39 @@ def ensure_runtime_columns(engine: Engine) -> None:
                     log_event(logger, "runtime_column_added", table=table_name, column=column_name)
                 except SQLAlchemyError as exc:  # pragma: no cover - defensive startup logging.
                     log_event(logger, "runtime_column_add_failed", table=table_name, column=column_name, error=str(exc))
+
+        _ensure_printed_page_columns_are_text(engine, conn)
+
+
+def _ensure_printed_page_columns_are_text(engine: Engine, conn) -> None:
+    """Convert legacy integer printed-page columns to text in PostgreSQL deployments."""
+    if engine.dialect.name != "postgresql":
+        return
+
+    inspector = inspect(conn)
+    existing_tables = set(inspector.get_table_names())
+    for table_name, column_names in _TEXT_PAGE_COLUMNS.items():
+        if table_name not in existing_tables:
+            continue
+
+        columns_by_name = {column["name"]: column for column in inspector.get_columns(table_name)}
+        for column_name in column_names:
+            column = columns_by_name.get(column_name)
+            if not column:
+                continue
+
+            column_type = str(column.get("type") or "").casefold()
+            if not any(marker in column_type for marker in _NUMERIC_TYPE_MARKERS):
+                continue
+
+            try:
+                conn.execute(
+                    text(
+                        f"ALTER TABLE {table_name} "
+                        f"ALTER COLUMN {column_name} TYPE {_TEXT_TYPE_DDL} "
+                        f"USING {column_name}::text"
+                    )
+                )
+                log_event(logger, "runtime_column_type_changed", table=table_name, column=column_name, type=_TEXT_TYPE_DDL)
+            except SQLAlchemyError as exc:  # pragma: no cover - defensive startup logging.
+                log_event(logger, "runtime_column_type_change_failed", table=table_name, column=column_name, error=str(exc))

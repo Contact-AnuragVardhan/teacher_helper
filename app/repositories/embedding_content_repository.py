@@ -42,8 +42,8 @@ class EmbeddingLessonMatch:
     structure_type: str | None
     pdf_start_page: int | None
     pdf_end_page: int | None
-    printed_start_page: int | None
-    printed_end_page: int | None
+    printed_start_page: str | None
+    printed_end_page: str | None
     text: str
     subsection_count: int = 0
     match_score: int = 0
@@ -76,8 +76,8 @@ class EmbeddingSubsection:
     anchor_marker: str | None
     pdf_start_page: int | None
     pdf_end_page: int | None
-    printed_start_page: int | None
-    printed_end_page: int | None
+    printed_start_page: str | None
+    printed_end_page: str | None
     page_numbers: list[int]
     printed_page_numbers: list[int]
     includes: list[str]

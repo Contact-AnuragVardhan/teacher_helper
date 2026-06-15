@@ -39,8 +39,8 @@ class LessonPlan(Base):
     book_pages: Mapped[str | None] = mapped_column(String(100), nullable=True)
     pdf_start_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
     pdf_end_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    printed_start_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    printed_end_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    printed_start_page: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    printed_end_page: Mapped[str | None] = mapped_column(String(100), nullable=True)
     resource_profile: Mapped[str | None] = mapped_column(String(100), nullable=True)
     format_profile: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
