@@ -69,6 +69,8 @@ class SubjectResolver:
                 f"Allowed canonical subjects: {allowed}.\n"
                 "The input may be English, Hindi in Devanagari, Hinglish, or misspelled.\n"
                 "Map History, Geography, Civics, Economics, and Social Studies to Social Science.\n"
+                "Map EVS, Environmental Studies, The World Around Us, and Our Wondrous World to Environmental Studies.\n"
+                "Do not map Environmental Studies or EVS to Science.\n"
                 "If the input cannot reasonably be mapped, return null.\n\n"
                 "Return ONLY compact JSON in this exact shape: {\"subject\": \"Science\"} or {\"subject\": null}.\n\n"
                 f"Preferred language context: {language or 'unknown'}\n"

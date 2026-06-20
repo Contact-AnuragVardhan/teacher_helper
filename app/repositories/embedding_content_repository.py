@@ -541,10 +541,26 @@ class EmbeddingContentRepository:
         return (value or "").strip().casefold().replace(" ", "")
 
     def _subject_variants(self, subject: str) -> list[str]:
-        normalized = normalize_subject(subject).casefold()
+        normalized_subject = normalize_subject(subject)
+        normalized = normalized_subject.casefold()
         variants = {normalized, (subject or "").strip().casefold()}
+
         if normalized in {"math", "maths", "mathematics"}:
             variants.update({"math", "maths", "mathematics"})
+
+        if normalized == "environmental studies":
+            variants.update({
+                "environmental studies",
+                "environment studies",
+                "environmental science",
+                "evs",
+                "e v s",
+                "the world around us",
+                "world around us",
+                "our wondrous world",
+                "wondrous world",
+            })
+
         return sorted(item for item in variants if item)
 
     def _is_numeric_lesson_number(self, value: str | None) -> bool:
