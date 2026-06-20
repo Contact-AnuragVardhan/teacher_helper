@@ -6,6 +6,7 @@ CANONICAL_SUBJECTS = (
     "English",
     "Hindi",
     "Social Science",
+    "Environmental Studies",
 )
 
 _SUBJECT_ALIASES = {
@@ -21,6 +22,7 @@ _SUBJECT_ALIASES = {
 
     "english": "English",
     "अंग्रेजी": "English",
+    "अंग्रेज़ी": "English",
     "इंग्लिश": "English",
 
     "hindi": "Hindi",
@@ -38,6 +40,24 @@ _SUBJECT_ALIASES = {
     "इतिहास": "Social Science",
     "भूगोल": "Social Science",
     "नागरिक शास्त्र": "Social Science",
+
+    # EVS / The World Around Us / Our Wondrous World.
+    # Keep this separate from Science so Grade 4 EVS books are looked up correctly.
+    "environmental studies": "Environmental Studies",
+    "environment studies": "Environmental Studies",
+    "environmental study": "Environmental Studies",
+    "environment study": "Environmental Studies",
+    "environmental science": "Environmental Studies",
+    "evs": "Environmental Studies",
+    "e v s": "Environmental Studies",
+    "the world around us": "Environmental Studies",
+    "world around us": "Environmental Studies",
+    "our wondrous world": "Environmental Studies",
+    "wondrous world": "Environmental Studies",
+    "पर्यावरण अध्ययन": "Environmental Studies",
+    "पर्यावरण": "Environmental Studies",
+    "ईवीएस": "Environmental Studies",
+    "ई वी एस": "Environmental Studies",
 
     # Existing aliases kept for backward compatibility.
     "political science": "Social Science",
@@ -80,12 +100,19 @@ def is_canonical_subject(value: str | None) -> bool:
     key = _normalize_key(value)
     return any(key == item.casefold() for item in CANONICAL_SUBJECTS)
 
+
+def subject_allowed_key(value: str | None) -> str:
+    """Stable key used for env validation and DB subject comparison."""
+    return _normalize_key(normalize_subject(value))
+
+
 _SUBJECT_DISPLAY_HINDI = {
     "Mathematics": "गणित",
     "Science": "विज्ञान",
     "English": "अंग्रेज़ी",
     "Hindi": "हिंदी",
     "Social Science": "सामाजिक विज्ञान",
+    "Environmental Studies": "पर्यावरण अध्ययन",
 }
 
 
