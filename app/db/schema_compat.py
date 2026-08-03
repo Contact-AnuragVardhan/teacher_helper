@@ -33,6 +33,9 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
         "temp_lesson_document_key": "VARCHAR(255)",
         "temp_lesson_school_name": "VARCHAR(255)",
         "temp_lesson_summary": "TEXT",
+        "temp_customize_from_page": "VARCHAR(100)",
+        "temp_customize_to_page": "VARCHAR(100)",
+        "temp_lesson_is_customized": "BOOLEAN DEFAULT FALSE",
     },
     "lesson_plan": {
         "document_id": "VARCHAR(80)",

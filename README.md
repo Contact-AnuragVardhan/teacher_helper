@@ -28,6 +28,7 @@ The current WhatsApp menu flow is:
 - Configurable duplicate lesson policy
 - SQLite for local development, PostgreSQL-ready for deployment
 - Structured logging
+- Generated lesson export to PDF and delivery as a WhatsApp document
 - Automated tests
 
 ## Requirements
@@ -62,6 +63,8 @@ Useful optional variables:
 - `LOG_LEVEL`
 - `ALLOW_ORIGINS`
 - `RESET_DB_ON_START`
+- `LESSON_PDF_FONT_PATH` and `LESSON_PDF_BOLD_FONT_PATH` when system fonts are unavailable
+- `LESSON_PDF_DEVANAGARI_FONT_PATH` and `LESSON_PDF_DEVANAGARI_BOLD_FONT_PATH` for Hindi PDF output
 
 ## SQLite example
 
@@ -201,3 +204,51 @@ curl -X POST http://127.0.0.1:8000/lesson/generate \
 Project / release link:
 
 `https://github.com/Contact-AnuragVardhan/teacher_helper/tree/Release-1`
+
+## Post-generation lesson actions and page customization
+
+After a detailed day lesson is generated, Teacher Helper displays:
+
+1. **Use this lesson** — opens the existing Save Lesson / Cancel / Main Menu flow.
+2. **Customize Lesson** — starts the direct page-range customization flow.
+3. **Print Lesson** — generates a formatted PDF from the current lesson, sends it to the teacher as a WhatsApp document, and shows the same action menu again.
+
+The direct customization sequence is:
+
+```text
+Customize Lesson
+→ Ask From Page
+→ Ask To Page
+→ Validate the contiguous chapter range
+→ Retrieve only those book pages
+→ Regenerate the lesson automatically
+→ Show Use this lesson / Customize Lesson / Print Lesson again
+```
+
+The From Page prompt displays the current lesson page range and the complete selected chapter range. After a valid From Page is entered, Teacher Helper asks for To Page. Entering a valid To Page immediately regenerates the lesson; there is no additional Create/Save menu selection.
+
+Inputs are treated as printed book-page values first, including compound labels such as `2/4`. An explicit physical page can be entered as `PDF 21`.
+
+Page customization reads only from `embeddings_page_extractions`. The selected pages must:
+
+- exist inside the selected chapter's physical PDF range;
+- form an inclusive, contiguous physical page sequence; and
+- contain usable extracted text.
+
+After regeneration, **Use this lesson** continues through the existing save and lesson-name flow. Customized lesson names automatically receive a trailing `*`, and saved source metadata records `source_type=pdf_to_embeddings_page_range`, the selected page range, and `is_customized=true`.
+
+Existing profile, language, lesson-list, save/cancel, share, delete, post-generation action, and Main Menu behavior remains available.
+
+## Print Lesson PDF export
+
+Selecting **Print Lesson** exports the currently generated lesson, including a customized lesson, without requiring the teacher to save it first. The PDF contains teacher, school, grade, subject, duration, book, chapter/section, day, selected book-page range, customization status, the full lesson plan, and page numbers.
+
+Delivery uses the WhatsApp Cloud API in two steps:
+
+1. Upload the generated `application/pdf` file to `/{PHONE_NUMBER_ID}/media`.
+2. Send a document message using the returned media ID, then send the existing Use / Customize / Print buttons again.
+
+The generated file is kept in memory only; the application does not need a persistent PDF folder. Mock webhook responses omit the base64 PDF body so test responses remain small.
+
+For Hindi PDFs, install the dependencies from `requirements.txt` and ensure a Devanagari font is available. The application checks common Noto Sans Devanagari locations and also supports explicit font paths through the `LESSON_PDF_*` environment variables. Font files are not included in this project archive.
+

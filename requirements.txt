@@ -8,3 +8,5 @@ pytest==8.3.5
 openai>=1.0,<2.0
 psycopg[binary]>=3.1,<4.0
 pypdf>=5.4,<6.0
+reportlab>=4.4,<5.0
+uharfbuzz>=0.48,<1.0

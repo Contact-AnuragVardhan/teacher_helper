@@ -100,6 +100,25 @@ class EmbeddingSubsection:
         return "Not available"
 
 
+@dataclass(slots=True)
+class EmbeddingPageExtraction:
+    pdf_page_number: int
+    printed_page_number: str | None
+    printed_page_label: str | None
+    text: str
+    include_in_lesson_text: bool | None = None
+    include_in_embeddings: bool | None = None
+    quality_flags: list[str] | None = None
+
+    @property
+    def display_page(self) -> str:
+        return (
+            (self.printed_page_number or "").strip()
+            or (self.printed_page_label or "").strip()
+            or f"PDF {self.pdf_page_number}"
+        )
+
+
 class EmbeddingContentRepository:
     """Read-only access to the pdf_to_embeddings tables in the same database."""
 
@@ -358,6 +377,121 @@ class EmbeddingContentRepository:
             self.db.rollback()
             return None
         return self._subsection_from_row(row) if row else None
+
+    def list_pages_for_lesson(self, lesson: EmbeddingLessonMatch) -> list[EmbeddingPageExtraction]:
+        """Return every physical page inside the selected chapter/section range.
+
+        Page-level customization uses ``embeddings_page_extractions`` as the
+        authoritative source. The query is constrained by the selected parent
+        record's physical PDF bounds, which prevents a teacher from selecting
+        pages from another chapter even when printed labels are unusual.
+        """
+        if not lesson.document_id or lesson.pdf_start_page is None or lesson.pdf_end_page is None:
+            return []
+
+        document_expr = "CAST(:document_id AS uuid)" if not self.settings.database_is_sqlite else ":document_id"
+        sql = text(
+            f"""
+            SELECT
+                pe.pdf_page_number,
+                pe.printed_page_number,
+                pe.printed_page_label,
+                COALESCE(
+                    NULLIF(pe.production_safe_text, ''),
+                    NULLIF(pe.production_page_text, ''),
+                    NULLIF(pe.text_plain, ''),
+                    NULLIF(pe.text, ''),
+                    NULLIF(pe.selectable_text, ''),
+                    NULLIF(pe.raw_extracted_text, ''),
+                    NULLIF(pe.ocr_text, ''),
+                    ''
+                ) AS text,
+                pe.include_in_lesson_text,
+                pe.include_in_embeddings,
+                pe.quality_flags
+            FROM {self._schema_prefix}embeddings_page_extractions pe
+            WHERE pe.document_id = {document_expr}
+              AND pe.pdf_page_number BETWEEN :pdf_start_page AND :pdf_end_page
+            ORDER BY pe.pdf_page_number
+            """
+        )
+        try:
+            rows = self.db.execute(
+                sql,
+                {
+                    "document_id": lesson.document_id,
+                    "pdf_start_page": lesson.pdf_start_page,
+                    "pdf_end_page": lesson.pdf_end_page,
+                },
+            ).mappings().all()
+        except SQLAlchemyError as exc:
+            log_event(
+                logger,
+                "embedding_chapter_pages_lookup_failed",
+                error=str(exc),
+                chapter_id=lesson.chapter_id,
+                document_id=lesson.document_id,
+            )
+            self.db.rollback()
+            return []
+
+        pages = [
+            EmbeddingPageExtraction(
+                pdf_page_number=int(row.get("pdf_page_number")),
+                printed_page_number=(str(row.get("printed_page_number")).strip() if row.get("printed_page_number") is not None else None),
+                printed_page_label=(str(row.get("printed_page_label")).strip() if row.get("printed_page_label") is not None else None),
+                text=row.get("text") or "",
+                include_in_lesson_text=row.get("include_in_lesson_text"),
+                include_in_embeddings=row.get("include_in_embeddings"),
+                quality_flags=self._as_list(row.get("quality_flags")),
+            )
+            for row in rows
+        ]
+        log_event(
+            logger,
+            "embedding_chapter_pages_lookup",
+            chapter_id=lesson.chapter_id,
+            document_id=lesson.document_id,
+            pdf_start_page=lesson.pdf_start_page,
+            pdf_end_page=lesson.pdf_end_page,
+            count=len(pages),
+        )
+        return pages
+
+    def resolve_page_choice(
+        self,
+        pages: list[EmbeddingPageExtraction],
+        value: str | None,
+    ) -> EmbeddingPageExtraction | None:
+        """Resolve an exact printed-page label or physical PDF page number."""
+        raw = (value or "").strip()
+        if not raw:
+            return None
+        normalized = raw.casefold().strip()
+        normalized = re.sub(r"^(?:book\s*)?page\s*[:#-]?\s*", "", normalized)
+        explicit_pdf = normalized.startswith("pdf")
+        if explicit_pdf:
+            normalized = re.sub(r"^pdf\s*[:#-]?\s*", "", normalized).strip()
+
+        if explicit_pdf and normalized.isdigit():
+            pdf_page = int(normalized)
+            return next((page for page in pages if page.pdf_page_number == pdf_page), None)
+
+        for page in pages:
+            labels = {
+                (page.printed_page_number or "").strip().casefold(),
+                (page.printed_page_label or "").strip().casefold(),
+            }
+            labels.discard("")
+            if normalized in labels:
+                return page
+
+        # Numeric input is normally a printed page. If the book has no matching
+        # printed number, accept the physical PDF page as a practical fallback.
+        if normalized.isdigit():
+            pdf_page = int(normalized)
+            return next((page for page in pages if page.pdf_page_number == pdf_page), None)
+        return None
 
     def _candidate_lessons(
         self,

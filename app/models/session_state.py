@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -39,6 +39,9 @@ class SessionState(Base):
     temp_lesson_document_key: Mapped[str | None] = mapped_column(String(255), nullable=True)
     temp_lesson_school_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
     temp_lesson_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    temp_customize_from_page: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    temp_customize_to_page: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    temp_lesson_is_customized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,
