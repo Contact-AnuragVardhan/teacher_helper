@@ -113,7 +113,7 @@ def _handle_mock_payload(payload: WhatsAppWebhookRequest, db: Session) -> JSONRe
         to=payload.from_number,
         reply=result.reply,
         current_state=result.current_state,
-        outbound=result.outbound,
+        outbound=_public_outbound(result.outbound),
     )
     return JSONResponse(status_code=200, content=response.model_dump())
 
@@ -184,3 +184,22 @@ def _extract_message_body(message: dict[str, Any]) -> str | None:
         return (button.get("payload") or button.get("text") or "").strip()
 
     return None
+
+def _public_outbound(outbound: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Remove generated file bytes from mock webhook responses."""
+    if not outbound:
+        return outbound
+
+    outbound_type = outbound.get("type")
+    if outbound_type == "document":
+        safe = {key: value for key, value in outbound.items() if key != "content_base64"}
+        encoded = outbound.get("content_base64") or ""
+        safe["content_base64_omitted"] = bool(encoded)
+        return safe
+
+    if outbound_type == "sequence":
+        safe = dict(outbound)
+        safe["messages"] = [_public_outbound(item) for item in outbound.get("messages", [])]
+        return safe
+
+    return outbound

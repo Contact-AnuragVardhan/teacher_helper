@@ -87,6 +87,9 @@ class SessionRepository:
         session.temp_lesson_document_key = None
         session.temp_lesson_school_name = None
         session.temp_lesson_summary = None
+        session.temp_customize_from_page = None
+        session.temp_customize_to_page = None
+        session.temp_lesson_is_customized = False
         log_event(logger, "session_clear_temp_lesson", whatsapp_number=session.whatsapp_number)
         return self.save(session)
 
@@ -123,6 +126,9 @@ class SessionRepository:
         session.temp_lesson_document_key = None
         session.temp_lesson_school_name = None
         session.temp_lesson_summary = None
+        session.temp_customize_from_page = None
+        session.temp_customize_to_page = None
+        session.temp_lesson_is_customized = False
         session.temp_profile_name = None
         session.temp_profile_grade = None
         session.temp_profile_subject = None

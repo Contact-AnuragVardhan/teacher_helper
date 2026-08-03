@@ -65,6 +65,29 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("whatsapp_api_timeout_seconds", "WHATSAPP_API_TIMEOUT_SECONDS"),
     )
 
+    lesson_pdf_font_path: str = Field(
+        default="",
+        validation_alias=AliasChoices("lesson_pdf_font_path", "LESSON_PDF_FONT_PATH"),
+    )
+    lesson_pdf_bold_font_path: str = Field(
+        default="",
+        validation_alias=AliasChoices("lesson_pdf_bold_font_path", "LESSON_PDF_BOLD_FONT_PATH"),
+    )
+    lesson_pdf_devanagari_font_path: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "lesson_pdf_devanagari_font_path",
+            "LESSON_PDF_DEVANAGARI_FONT_PATH",
+        ),
+    )
+    lesson_pdf_devanagari_bold_font_path: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "lesson_pdf_devanagari_bold_font_path",
+            "LESSON_PDF_DEVANAGARI_BOLD_FONT_PATH",
+        ),
+    )
+
     jalta_sitara_hotline_language_api_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices(

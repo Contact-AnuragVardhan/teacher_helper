@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 from typing import Any
 
 import httpx
@@ -69,6 +71,101 @@ class WhatsAppMetaService:
             message_type=payload.get("type"),
         )
         return result
+
+    def _upload_media(
+        self,
+        *,
+        content: bytes,
+        filename: str,
+        content_type: str,
+    ) -> str:
+        if not self.settings.whatsapp_access_token:
+            raise ValueError("WHATSAPP_ACCESS_TOKEN is not configured.")
+        if not self.settings.whatsapp_phone_number_id:
+            raise ValueError("WHATSAPP_PHONE_NUMBER_ID is not configured.")
+        if not content:
+            raise ValueError("Document content is empty.")
+
+        url = (
+            f"https://graph.facebook.com/{self.settings.whatsapp_graph_version}/"
+            f"{self.settings.whatsapp_phone_number_id}/media"
+        )
+        headers = {"Authorization": f"Bearer {self.settings.whatsapp_access_token}"}
+        files = {"file": (filename, content, content_type)}
+        data = {"messaging_product": "whatsapp", "type": content_type}
+
+        log_event(
+            logger,
+            "whatsapp_graph_media_upload_attempt",
+            filename=filename,
+            content_type=content_type,
+            content_length=len(content),
+        )
+        response = httpx.post(
+            url,
+            headers=headers,
+            data=data,
+            files=files,
+            timeout=self.settings.whatsapp_api_timeout_seconds,
+        )
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            response_preview = response.text[:1000] if response.text else ""
+            log_event(
+                logger,
+                "whatsapp_graph_media_upload_http_error",
+                filename=filename,
+                status_code=response.status_code,
+                response_preview=response_preview,
+            )
+            raise
+
+        result = response.json()
+        media_id = str(result.get("id") or "").strip()
+        if not media_id:
+            raise ValueError("WhatsApp media upload response did not contain a media id.")
+        log_event(
+            logger,
+            "whatsapp_graph_media_upload_success",
+            filename=filename,
+            media_id=media_id,
+        )
+        return media_id
+
+    def send_document_message(
+        self,
+        *,
+        to_number: str,
+        content: bytes,
+        filename: str,
+        content_type: str = "application/pdf",
+        caption: str | None = None,
+    ) -> dict[str, Any]:
+        media_id = self._upload_media(
+            content=content,
+            filename=filename,
+            content_type=content_type,
+        )
+        document: dict[str, Any] = {"id": media_id, "filename": filename}
+        if caption and caption.strip():
+            document["caption"] = caption.strip()
+        return self._post(
+            {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to_number,
+                "type": "document",
+                "document": document,
+            }
+        )
+
+    @staticmethod
+    def _decode_base64_content(value: str) -> bytes:
+        try:
+            return base64.b64decode(value or "", validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise ValueError("Outbound document content_base64 is invalid.") from exc
 
     def _normalize_text_body(self, body: str) -> str:
         return (body or "").replace("\r\n", "\n").strip()
@@ -233,6 +330,39 @@ class WhatsAppMetaService:
         }
         return self._post(payload)
 
+    def _send_outbound_item(self, *, to_number: str, item: dict[str, Any]) -> dict[str, Any]:
+        item_type = item.get("type")
+        if item_type == "text":
+            return self.send_text_messages(to_number=to_number, body=item.get("body", ""))
+        if item_type == "buttons":
+            return self.send_reply_buttons(
+                to_number=to_number,
+                body=item["body"],
+                buttons=item["buttons"],
+                header_text=item.get("header"),
+                footer_text=item.get("footer"),
+            )
+        if item_type == "list":
+            return self.send_list_message(
+                to_number=to_number,
+                header_text=item["header"],
+                body=item["body"],
+                button_text=item["button_text"],
+                rows=item["rows"],
+                footer_text=item.get("footer"),
+                section_title=item.get("section_title", "Options"),
+            )
+        if item_type == "document":
+            content = self._decode_base64_content(item.get("content_base64", ""))
+            return self.send_document_message(
+                to_number=to_number,
+                content=content,
+                filename=item.get("filename") or "lesson-plan.pdf",
+                content_type=item.get("content_type") or "application/pdf",
+                caption=item.get("caption"),
+            )
+        raise ValueError(f"Unsupported outbound message type: {item_type!r}")
+
     def send_outbound_message(
         self,
         *,
@@ -244,31 +374,13 @@ class WhatsAppMetaService:
             return self.send_text_messages(to_number=to_number, body=reply_text)
 
         outbound_type = outbound.get("type")
+        if outbound_type == "sequence":
+            results = [
+                self._send_outbound_item(to_number=to_number, item=item)
+                for item in outbound.get("messages", [])
+            ]
+            return {"status": "sent", "message_count": len(results), "results": results}
 
-        if outbound_type == "buttons":
-            if reply_text and reply_text.strip():
-                self.send_text_messages(to_number=to_number, body=reply_text)
-
-            return self.send_reply_buttons(
-                to_number=to_number,
-                body=outbound["body"],
-                buttons=outbound["buttons"],
-                header_text=outbound.get("header"),
-                footer_text=outbound.get("footer"),
-            )
-
-        if outbound_type == "list":
-            if reply_text and reply_text.strip():
-                self.send_text_messages(to_number=to_number, body=reply_text)
-
-            return self.send_list_message(
-                to_number=to_number,
-                header_text=outbound["header"],
-                body=outbound["body"],
-                button_text=outbound["button_text"],
-                rows=outbound["rows"],
-                footer_text=outbound.get("footer"),
-                section_title=outbound.get("section_title", "Options"),
-            )
-
-        return self.send_text_messages(to_number=to_number, body=reply_text)
+        if reply_text and reply_text.strip():
+            self.send_text_messages(to_number=to_number, body=reply_text)
+        return self._send_outbound_item(to_number=to_number, item=outbound)

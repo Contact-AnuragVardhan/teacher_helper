@@ -1,4 +1,5 @@
 from dataclasses import dataclass, replace
+import base64
 from datetime import datetime
 import re
 
@@ -7,12 +8,13 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.language import DEFAULT_LANGUAGE, language_key, normalize_language
 from app.core.logging import get_logger, log_event
-from app.repositories.embedding_content_repository import EmbeddingContentRepository, EmbeddingLessonMatch, EmbeddingSubsection
+from app.repositories.embedding_content_repository import EmbeddingContentRepository, EmbeddingLessonMatch, EmbeddingPageExtraction, EmbeddingSubsection
 from app.repositories.lesson_repository import AccessibleLessonSummary, LessonRepository
 from app.repositories.session_repository import SessionRepository
 from app.repositories.teacher_repository import TeacherRepository
 from app.services.lesson_generator import LessonGeneratorService
 from app.services.lesson_payload_builder import LessonPayloadBuilder
+from app.services.lesson_pdf_service import LessonPdfMetadata, LessonPdfService
 from app.services.pdf_content_lesson_service import PdfContentLessonService
 from app.services.preferred_language_api_service import PreferredLanguageApiService
 from app.services.subject_resolver import SubjectResolver
@@ -62,6 +64,33 @@ TEXT: dict[str, dict[str, str]] = {
         "duration_prompt": "कक्षा की अवधि मिनटों में लिखें। उदाहरण: 35",
         "invalid_duration": "कृपया कक्षा की अवधि मिनटों में लिखें, उदाहरण 35।",
         "generated_lesson_prefix": "यह आपकी तैयार की गई पाठ योजना है:",
+        "lesson_ready_action_body": "अब इस पाठ के लिए एक विकल्प चुनें।",
+        "lesson_ready_action_footer": "पाठ का उपयोग, बदलाव या प्रिंट चुनें",
+        "btn_use_lesson": "पाठ उपयोग करें",
+        "btn_customize_lesson": "पाठ बदलें",
+        "btn_print_lesson": "पाठ प्रिंट करें",
+        "lesson_ready_invalid": "कृपया पाठ का उपयोग करें, पाठ बदलें या पाठ प्रिंट करें विकल्प चुनें।",
+        "print_lesson_ready": "आपकी पाठ योजना PDF तैयार है।",
+        "print_lesson_failed": "पाठ योजना PDF नहीं बन सकी। कृपया फिर से Print Lesson चुनें।",
+        "print_lesson_caption": "Teacher Helper - पाठ योजना",
+        "customize_header": "पाठ बदलें",
+        "customize_body": "वर्तमान पेज: {current_range}\nअध्याय की सीमा: {chapter_range}\nचुना हुआ From Page: {from_page}\nचुना हुआ To Page: {to_page}",
+        "not_selected": "नहीं चुना गया",
+        "customize_button": "विकल्प",
+        "customize_section": "पेज बदलें",
+        "customize_footer": "From/To बदलें, फिर updated lesson बनाएँ।",
+        "customize_invalid": "कृपया From Page, To Page, बनाएँ/सेव करें या वापस चुनें।",
+        "customize_from_row": "1. From Page",
+        "customize_to_row": "2. To Page",
+        "customize_create_row": "4. बनाएँ/सेव करें",
+        "customize_back_row": "5. वापस",
+        "customize_from_prompt": "नया From Page लिखें। यह वर्तमान अध्याय की सीमा {chapter_range} के भीतर होना चाहिए।",
+        "customize_to_prompt": "नया To Page लिखें। यह वर्तमान अध्याय की सीमा {chapter_range} के भीतर होना चाहिए।",
+        "customize_page_invalid": "यह पेज वर्तमान अध्याय में नहीं है। उपलब्ध अध्याय सीमा: {chapter_range}।",
+        "customize_range_invalid": "From Page, To Page से आगे नहीं हो सकता और सभी चुने हुए पेज लगातार होने चाहिए। वर्तमान चयन: {from_page}-{to_page}।",
+        "customize_pages_unavailable": "इस अध्याय के page_extractions उपलब्ध नहीं हैं, इसलिए पेज के अनुसार बदलाव नहीं किया जा सकता।",
+        "customize_text_unavailable": "चुने हुए पेजों में पाठ बनाने के लिए टेक्स्ट नहीं मिला। कृपया दूसरी लगातार पेज सीमा चुनें।",
+        "customized_lesson_prefix": "यह चुने हुए पेजों से दोबारा तैयार किया गया पाठ है:",
         "save_body": "क्या आप इस पाठ को सेव करना चाहते हैं?",
         "save_footer": "एक विकल्प चुनें",
         "btn_save": "पाठ सेव करें",
@@ -177,6 +206,33 @@ TEXT: dict[str, dict[str, str]] = {
         "duration_prompt": "Please enter class duration in minutes. Example: 35",
         "invalid_duration": "Please enter class duration in minutes, for example 35.",
         "generated_lesson_prefix": "Here is your generated lesson plan:",
+        "lesson_ready_action_body": "Choose what you want to do with this generated lesson.",
+        "lesson_ready_action_footer": "Use, customize, or print the lesson",
+        "btn_use_lesson": "Use this lesson",
+        "btn_customize_lesson": "Customize Lesson",
+        "btn_print_lesson": "Print Lesson",
+        "lesson_ready_invalid": "Please choose Use this lesson, Customize Lesson, or Print Lesson.",
+        "print_lesson_ready": "Your lesson plan PDF is ready.",
+        "print_lesson_failed": "The lesson plan PDF could not be created. Please choose Print Lesson again.",
+        "print_lesson_caption": "Teacher Helper - Lesson Plan",
+        "customize_header": "Customize Lesson",
+        "customize_body": "Current page range: {current_range}\nChapter page range: {chapter_range}\nSelected From Page: {from_page}\nSelected To Page: {to_page}",
+        "not_selected": "Not selected",
+        "customize_button": "Options",
+        "customize_section": "Change Pages",
+        "customize_footer": "Change From/To pages, then create and save the updated lesson.",
+        "customize_invalid": "Please choose From Page, To Page, Create/Save, or Back.",
+        "customize_from_row": "1. From Page",
+        "customize_to_row": "2. To Page",
+        "customize_create_row": "4. Create/Save",
+        "customize_back_row": "5. Back",
+        "customize_from_prompt": "Enter the new From Page. It must be within the current chapter range: {chapter_range}.",
+        "customize_to_prompt": "Enter the new To Page. It must be within the current chapter range: {chapter_range}.",
+        "customize_page_invalid": "That page is not inside the current chapter. Available chapter range: {chapter_range}.",
+        "customize_range_invalid": "From Page cannot be after To Page, and every selected page must be contiguous. Current selection: {from_page}-{to_page}.",
+        "customize_pages_unavailable": "Page-level extraction is not available for this chapter, so the lesson cannot be customized by page.",
+        "customize_text_unavailable": "No usable text was found in the selected pages. Please choose another contiguous page range.",
+        "customized_lesson_prefix": "Here is the lesson regenerated from your selected pages:",
         "save_body": "Do you want to save this lesson?",
         "save_footer": "Choose one option",
         "btn_save": "Save Lesson",
@@ -292,6 +348,33 @@ TEXT: dict[str, dict[str, str]] = {
         "duration_prompt": "Class duration minutes mein likhein. Example: 35",
         "invalid_duration": "Please class duration minutes mein likhein, example 35.",
         "generated_lesson_prefix": "Yeh aapka generated lesson plan hai:",
+        "lesson_ready_action_body": "Generated lesson ke saath kya karna hai, option choose karein.",
+        "lesson_ready_action_footer": "Use, customize ya print choose karein",
+        "btn_use_lesson": "Use Lesson",
+        "btn_customize_lesson": "Customize",
+        "btn_print_lesson": "Print Lesson",
+        "lesson_ready_invalid": "Please Use Lesson, Customize, ya Print Lesson choose karein.",
+        "print_lesson_ready": "Aapki lesson plan PDF ready hai.",
+        "print_lesson_failed": "Lesson plan PDF create nahi ho saki. Please Print Lesson dobara choose karein.",
+        "print_lesson_caption": "Teacher Helper - Lesson Plan",
+        "customize_header": "Customize Lesson",
+        "customize_body": "Current page range: {current_range}\nChapter page range: {chapter_range}\nSelected From Page: {from_page}\nSelected To Page: {to_page}",
+        "not_selected": "Not selected",
+        "customize_button": "Options",
+        "customize_section": "Change Pages",
+        "customize_footer": "From/To pages change karke updated lesson create/save karein.",
+        "customize_invalid": "Please From Page, To Page, Create/Save ya Back choose karein.",
+        "customize_from_row": "1. From Page",
+        "customize_to_row": "2. To Page",
+        "customize_create_row": "4. Create/Save",
+        "customize_back_row": "5. Back",
+        "customize_from_prompt": "New From Page likhein. Yeh current chapter range {chapter_range} ke andar hona chahiye.",
+        "customize_to_prompt": "New To Page likhein. Yeh current chapter range {chapter_range} ke andar hona chahiye.",
+        "customize_page_invalid": "Yeh page current chapter ke andar nahi hai. Available chapter range: {chapter_range}.",
+        "customize_range_invalid": "From Page, To Page ke baad nahi ho sakta aur selected pages contiguous hone chahiye. Current selection: {from_page}-{to_page}.",
+        "customize_pages_unavailable": "Is chapter ke page_extractions available nahi hain, isliye page-wise customization possible nahi hai.",
+        "customize_text_unavailable": "Selected pages mein usable text nahi mila. Please doosra contiguous page range choose karein.",
+        "customized_lesson_prefix": "Yeh selected pages se regenerated lesson hai:",
         "save_body": "Kya aap is lesson ko save karna chahte hain?",
         "save_footer": "Ek option choose karein",
         "btn_save": "Save Lesson",
@@ -391,6 +474,7 @@ class ConversationService:
         self.lesson_generator = LessonGeneratorService(db)
         self.pdf_content_lesson_service = PdfContentLessonService(db)
         self.lesson_payload_builder = LessonPayloadBuilder()
+        self.lesson_pdf_service = LessonPdfService(self.settings)
         self.subject_resolver = SubjectResolver(self.settings)
         self.preferred_language_api = PreferredLanguageApiService(self.settings)
 
@@ -423,6 +507,10 @@ class ConversationService:
             ConversationState.NEW_LESSON_DAY: self._handle_new_lesson_day,
             ConversationState.NEW_LESSON_SUBJECT: self._handle_new_lesson_subject,
             ConversationState.NEW_LESSON_DURATION: self._handle_new_lesson_duration,
+            ConversationState.NEW_LESSON_ACTION_MENU: self._handle_new_lesson_action_menu,
+            ConversationState.NEW_LESSON_CUSTOMIZE_MENU: self._handle_new_lesson_customize_menu,
+            ConversationState.NEW_LESSON_CUSTOMIZE_FROM_PAGE: self._handle_new_lesson_customize_from_page,
+            ConversationState.NEW_LESSON_CUSTOMIZE_TO_PAGE: self._handle_new_lesson_customize_to_page,
             ConversationState.NEW_LESSON_CONFIRM_SAVE: self._handle_new_lesson_confirm_save,
             ConversationState.NEW_LESSON_CONFIRM_NAME: self._handle_new_lesson_confirm_name,
             ConversationState.NEW_LESSON_NAME: self._handle_new_lesson_name,
@@ -700,6 +788,241 @@ class ConversationService:
                 ],
             },
         )
+
+    def _generated_lesson_action_outbound(self, language: str) -> dict:
+        return {
+            "type": "buttons",
+            "header": self._text(language, "main_header"),
+            "body": self._text(language, "lesson_ready_action_body"),
+            "footer": self._text(language, "lesson_ready_action_footer"),
+            "buttons": [
+                {"id": "use_generated_lesson", "title": self._text(language, "btn_use_lesson")},
+                {"id": "customize_generated_lesson", "title": self._text(language, "btn_customize_lesson")},
+                {"id": "print_generated_lesson", "title": self._text(language, "btn_print_lesson")},
+            ],
+        }
+
+    def _generated_lesson_action_reply(
+        self,
+        lesson_text: str,
+        language: str,
+        *,
+        prefix: str | None = None,
+    ) -> ConversationReply:
+        reply_parts = []
+        if prefix:
+            reply_parts.append(prefix.strip())
+        reply_parts.append(f"{self._text(language, 'generated_lesson_prefix')}\n\n{lesson_text}")
+        return self._reply(
+            "\n\n".join(part for part in reply_parts if part),
+            ConversationState.NEW_LESSON_ACTION_MENU,
+            outbound=self._generated_lesson_action_outbound(language),
+        )
+
+    def _print_generated_lesson_reply(self, *, session, teacher, language: str) -> ConversationReply:
+        lesson_text = (session.temp_generated_lesson or "").strip()
+        if not lesson_text:
+            return self._generated_lesson_action_reply(
+                "",
+                language,
+                prefix=self._text(language, "print_lesson_failed"),
+            )
+
+        day_title = session.temp_lesson_day_title or (
+            f"Day {session.temp_lesson_day_number}" if session.temp_lesson_day_number else ""
+        )
+        metadata = LessonPdfMetadata(
+            teacher_name=getattr(teacher, "teacher_name", "") or "",
+            school_name=session.temp_lesson_school_name or getattr(teacher, "school_name", "") or "",
+            grade=session.temp_profile_grade or getattr(teacher, "default_grade", "") or "",
+            subject=session.temp_profile_subject or getattr(teacher, "default_subject", "") or "",
+            duration_minutes=session.temp_duration_minutes,
+            book_title=session.temp_lesson_book_title or "",
+            chapter_title=session.temp_lesson_chapter_title or session.temp_topic or "",
+            section_title=session.temp_lesson_section_title or "",
+            day_title=day_title,
+            pages=session.temp_lesson_book_pages or "",
+            is_customized=bool(session.temp_lesson_is_customized),
+        )
+
+        try:
+            generated_pdf = self.lesson_pdf_service.generate(
+                lesson_text=lesson_text,
+                metadata=metadata,
+            )
+        except Exception as exc:
+            log_event(
+                logger,
+                "lesson_pdf_generation_failed",
+                teacher_id=getattr(teacher, "id", None),
+                chapter_id=session.temp_content_chapter_id,
+                error=str(exc),
+            )
+            return self._generated_lesson_action_reply(
+                lesson_text,
+                language,
+                prefix=self._text(language, "print_lesson_failed"),
+            )
+
+        encoded_pdf = base64.b64encode(generated_pdf.content).decode("ascii")
+        session.current_state = ConversationState.NEW_LESSON_ACTION_MENU.value
+        self.session_repo.save(session)
+        log_event(
+            logger,
+            "lesson_pdf_generated",
+            teacher_id=getattr(teacher, "id", None),
+            chapter_id=session.temp_content_chapter_id,
+            filename=generated_pdf.filename,
+            pdf_size_bytes=len(generated_pdf.content),
+            customized=bool(session.temp_lesson_is_customized),
+        )
+        return self._reply(
+            self._text(language, "print_lesson_ready"),
+            ConversationState.NEW_LESSON_ACTION_MENU,
+            outbound={
+                "type": "sequence",
+                "messages": [
+                    {
+                        "type": "document",
+                        "filename": generated_pdf.filename,
+                        "content_type": "application/pdf",
+                        "content_base64": encoded_pdf,
+                        "caption": self._text(language, "print_lesson_caption"),
+                    },
+                    self._generated_lesson_action_outbound(language),
+                ],
+            },
+        )
+
+    def _customize_lesson_reply(
+        self,
+        *,
+        session,
+        lesson: EmbeddingLessonMatch,
+        pages: list[EmbeddingPageExtraction],
+        language: str,
+        prefix: str | None = None,
+    ) -> ConversationReply:
+        chapter_range = self._chapter_page_range(lesson, pages)
+        current_range = session.temp_lesson_book_pages or lesson.display_pages
+        from_page = session.temp_customize_from_page or session.temp_lesson_printed_start_page or (
+            f"PDF {session.temp_lesson_pdf_start_page}" if session.temp_lesson_pdf_start_page else self._text(language, "not_selected")
+        )
+        to_page = session.temp_customize_to_page or session.temp_lesson_printed_end_page or (
+            f"PDF {session.temp_lesson_pdf_end_page}" if session.temp_lesson_pdf_end_page else self._text(language, "not_selected")
+        )
+        body = self._text(
+            language,
+            "customize_body",
+            current_range=current_range,
+            chapter_range=chapter_range,
+            from_page=from_page,
+            to_page=to_page,
+        )
+        reply_parts = [prefix.strip()] if prefix else []
+        reply_parts.append(body)
+        return self._reply(
+            "\n\n".join(reply_parts),
+            ConversationState.NEW_LESSON_CUSTOMIZE_MENU,
+            outbound={
+                "type": "list",
+                "header": self._text(language, "customize_header"),
+                "body": body,
+                "button_text": self._text(language, "customize_button"),
+                "section_title": self._text(language, "customize_section"),
+                "footer": self._text(language, "customize_footer"),
+                "rows": [
+                    {"id": "customize_from_page", "title": self._text(language, "customize_from_row")[:24]},
+                    {"id": "customize_to_page", "title": self._text(language, "customize_to_row")[:24]},
+                    {"id": "customize_create_save", "title": self._text(language, "customize_create_row")[:24]},
+                    {"id": "customize_back", "title": self._text(language, "customize_back_row")[:24]},
+                ],
+            },
+        )
+
+    def _customize_from_page_prompt_reply(
+        self,
+        *,
+        session,
+        lesson: EmbeddingLessonMatch,
+        pages: list[EmbeddingPageExtraction],
+        language: str,
+        prefix: str | None = None,
+    ) -> ConversationReply:
+        chapter_range = self._chapter_page_range(lesson, pages)
+        current_range = session.temp_lesson_book_pages or lesson.display_pages
+        parts = []
+        if prefix:
+            parts.append(prefix.strip())
+        parts.append(
+            f"{self._text(language, 'customize_header')}\n"
+            f"{self._text(language, 'customize_body', current_range=current_range, chapter_range=chapter_range, from_page=self._text(language, 'not_selected'), to_page=self._text(language, 'not_selected'))}\n\n"
+            f"{self._text(language, 'customize_from_prompt', chapter_range=chapter_range)}"
+        )
+        return self._reply(
+            "\n\n".join(parts),
+            ConversationState.NEW_LESSON_CUSTOMIZE_FROM_PAGE,
+        )
+
+    def _customize_to_page_prompt_reply(
+        self,
+        *,
+        session,
+        lesson: EmbeddingLessonMatch,
+        pages: list[EmbeddingPageExtraction],
+        language: str,
+        prefix: str | None = None,
+    ) -> ConversationReply:
+        chapter_range = self._chapter_page_range(lesson, pages)
+        current_range = session.temp_lesson_book_pages or lesson.display_pages
+        from_page = session.temp_customize_from_page or self._text(language, "not_selected")
+        parts = []
+        if prefix:
+            parts.append(prefix.strip())
+        parts.append(
+            f"{self._text(language, 'customize_header')}\n"
+            f"{self._text(language, 'customize_body', current_range=current_range, chapter_range=chapter_range, from_page=from_page, to_page=self._text(language, 'not_selected'))}\n\n"
+            f"{self._text(language, 'customize_to_prompt', chapter_range=chapter_range)}"
+        )
+        return self._reply(
+            "\n\n".join(parts),
+            ConversationState.NEW_LESSON_CUSTOMIZE_TO_PAGE,
+        )
+
+    def _chapter_page_range(
+        self,
+        lesson: EmbeddingLessonMatch,
+        pages: list[EmbeddingPageExtraction],
+    ) -> str:
+        if pages:
+            return f"{pages[0].display_page}-{pages[-1].display_page}"
+        return lesson.display_pages
+
+    def _initialize_custom_page_selection(
+        self,
+        session,
+        pages: list[EmbeddingPageExtraction],
+    ) -> None:
+        start_choice = session.temp_lesson_printed_start_page or (
+            f"PDF {session.temp_lesson_pdf_start_page}" if session.temp_lesson_pdf_start_page else None
+        )
+        end_choice = session.temp_lesson_printed_end_page or (
+            f"PDF {session.temp_lesson_pdf_end_page}" if session.temp_lesson_pdf_end_page else None
+        )
+        start_page = self.embedding_content_repo.resolve_page_choice(pages, start_choice)
+        end_page = self.embedding_content_repo.resolve_page_choice(pages, end_choice)
+        if not start_page and pages:
+            start_page = pages[0]
+        if not end_page and pages:
+            end_page = pages[-1]
+        session.temp_customize_from_page = start_page.display_page if start_page else start_choice
+        session.temp_customize_to_page = end_page.display_page if end_page else end_choice
+
+    def _ensure_customized_lesson_name(self, lesson_name: str) -> str:
+        cleaned = (lesson_name or "").strip()
+        if cleaned.endswith("*"):
+            return cleaned
+        return f"{cleaned[:254]}*"
 
     def _lesson_topic_reply(
         self,
@@ -1563,10 +1886,17 @@ class ConversationService:
         session.temp_lesson_pdf_end_page = subsection.pdf_end_page
         session.temp_lesson_printed_start_page = subsection.printed_start_page
         session.temp_lesson_printed_end_page = subsection.printed_end_page
+        session.temp_customize_from_page = subsection.printed_start_page or (
+            f"PDF {subsection.pdf_start_page}" if subsection.pdf_start_page else None
+        )
+        session.temp_customize_to_page = subsection.printed_end_page or (
+            f"PDF {subsection.pdf_end_page}" if subsection.pdf_end_page else None
+        )
+        session.temp_lesson_is_customized = False
         session.temp_topic = lesson.title
         session.temp_duration_minutes = requested_duration or result.duration_minutes
         session.temp_generated_lesson = result.lesson_text
-        session.current_state = ConversationState.NEW_LESSON_CONFIRM_SAVE.value
+        session.current_state = ConversationState.NEW_LESSON_ACTION_MENU.value
         self.session_repo.save(session)
 
         log_event(
@@ -1581,7 +1911,7 @@ class ConversationService:
             teacher_input_duration_minutes=requested_duration,
             provider_used=result.provider_used,
         )
-        return self._save_menu_reply(result.lesson_text, language)
+        return self._generated_lesson_action_reply(result.lesson_text, language)
 
     def _handle_new_lesson_grade(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
@@ -1740,13 +2070,399 @@ class ConversationService:
             language=language,
         )
 
+    def _handle_new_lesson_action_menu(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+        language = self._teacher_language(teacher, whatsapp_number)
+        choice = normalize_choice(text)
+        if not teacher:
+            session.current_state = ConversationState.PROFILE_NAME.value
+            self.session_repo.save(session)
+            return self._reply(self._text(language, "new_lesson_without_profile"), ConversationState.PROFILE_NAME)
+
+        if choice in {"1", "use this lesson", "use lesson", "use_generated_lesson"}:
+            session.current_state = ConversationState.NEW_LESSON_CONFIRM_SAVE.value
+            self.session_repo.save(session)
+            return self._save_menu_reply(session.temp_generated_lesson or "", language)
+
+        if choice in {"2", "customize lesson", "customize", "customize_generated_lesson", "पाठ बदलें"}:
+            lesson = self.embedding_content_repo.get_lesson_by_chapter_id(session.temp_content_chapter_id or "")
+            if not lesson:
+                self.session_repo.reset_for_main_menu(session)
+                return self._main_menu_reply(self._text(language, "lesson_no_match", topic=session.temp_topic or ""), language)
+            pages = self.embedding_content_repo.list_pages_for_lesson(lesson)
+            if not pages:
+                return self._generated_lesson_action_reply(
+                    session.temp_generated_lesson or "",
+                    language,
+                    prefix=self._text(language, "customize_pages_unavailable"),
+                )
+
+            # Start the direct customization sequence. Do not show a second menu:
+            # Customize Lesson -> From Page -> To Page -> regenerate lesson.
+            session.temp_customize_from_page = None
+            session.temp_customize_to_page = None
+            session.current_state = ConversationState.NEW_LESSON_CUSTOMIZE_FROM_PAGE.value
+            self.session_repo.save(session)
+            return self._customize_from_page_prompt_reply(
+                session=session,
+                lesson=lesson,
+                pages=pages,
+                language=language,
+            )
+
+        if choice in {"3", "print lesson", "print_generated_lesson", "पाठ प्रिंट करें"}:
+            return self._print_generated_lesson_reply(
+                session=session,
+                teacher=teacher,
+                language=language,
+            )
+
+        return self._generated_lesson_action_reply(
+            session.temp_generated_lesson or "",
+            language,
+            prefix=self._text(language, "lesson_ready_invalid"),
+        )
+
+    def _handle_new_lesson_customize_menu(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+        language = self._teacher_language(teacher, whatsapp_number)
+        choice = normalize_choice(text)
+        if not teacher:
+            session.current_state = ConversationState.PROFILE_NAME.value
+            self.session_repo.save(session)
+            return self._reply(self._text(language, "new_lesson_without_profile"), ConversationState.PROFILE_NAME)
+        lesson = self.embedding_content_repo.get_lesson_by_chapter_id(session.temp_content_chapter_id or "")
+        if not lesson:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply(self._text(language, "lesson_no_match", topic=session.temp_topic or ""), language)
+        pages = self.embedding_content_repo.list_pages_for_lesson(lesson)
+        if not pages:
+            session.current_state = ConversationState.NEW_LESSON_ACTION_MENU.value
+            self.session_repo.save(session)
+            return self._generated_lesson_action_reply(
+                session.temp_generated_lesson or "",
+                language,
+                prefix=self._text(language, "customize_pages_unavailable"),
+            )
+
+        chapter_range = self._chapter_page_range(lesson, pages)
+        if choice in {"1", "from page", "customize_from_page"}:
+            session.current_state = ConversationState.NEW_LESSON_CUSTOMIZE_FROM_PAGE.value
+            self.session_repo.save(session)
+            return self._reply(
+                self._text(language, "customize_from_prompt", chapter_range=chapter_range),
+                ConversationState.NEW_LESSON_CUSTOMIZE_FROM_PAGE,
+            )
+
+        if choice in {"2", "to page", "customize_to_page"}:
+            session.current_state = ConversationState.NEW_LESSON_CUSTOMIZE_TO_PAGE.value
+            self.session_repo.save(session)
+            return self._reply(
+                self._text(language, "customize_to_prompt", chapter_range=chapter_range),
+                ConversationState.NEW_LESSON_CUSTOMIZE_TO_PAGE,
+            )
+
+        if choice in {"4", "create/save updated lesson", "create/save", "customize_create_save"}:
+            return self._generate_customized_lesson(
+                session=session,
+                teacher=teacher,
+                lesson=lesson,
+                pages=pages,
+                language=language,
+            )
+
+        if choice in {"5", "back", "customize_back", "वापस"}:
+            session.current_state = ConversationState.NEW_LESSON_ACTION_MENU.value
+            self.session_repo.save(session)
+            return self._generated_lesson_action_reply(session.temp_generated_lesson or "", language)
+
+        return self._customize_lesson_reply(
+            session=session,
+            lesson=lesson,
+            pages=pages,
+            language=language,
+            prefix=self._text(language, "customize_invalid"),
+        )
+
+    def _handle_new_lesson_customize_from_page(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        return self._store_custom_page_choice(
+            session=session,
+            whatsapp_number=whatsapp_number,
+            text=text,
+            is_from_page=True,
+        )
+
+    def _handle_new_lesson_customize_to_page(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        return self._store_custom_page_choice(
+            session=session,
+            whatsapp_number=whatsapp_number,
+            text=text,
+            is_from_page=False,
+        )
+
+    def _store_custom_page_choice(
+        self,
+        *,
+        session,
+        whatsapp_number: str,
+        text: str,
+        is_from_page: bool,
+    ) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+        language = self._teacher_language(teacher, whatsapp_number)
+        if not teacher:
+            session.current_state = ConversationState.PROFILE_NAME.value
+            self.session_repo.save(session)
+            return self._reply(self._text(language, "new_lesson_without_profile"), ConversationState.PROFILE_NAME)
+        lesson = self.embedding_content_repo.get_lesson_by_chapter_id(session.temp_content_chapter_id or "")
+        if not lesson:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply(self._text(language, "lesson_no_match", topic=session.temp_topic or ""), language)
+        pages = self.embedding_content_repo.list_pages_for_lesson(lesson)
+        if normalize_choice(text) in {"5", "back", "customize_back", "वापस"}:
+            session.current_state = ConversationState.NEW_LESSON_ACTION_MENU.value
+            self.session_repo.save(session)
+            return self._generated_lesson_action_reply(session.temp_generated_lesson or "", language)
+        if not pages:
+            session.current_state = ConversationState.NEW_LESSON_ACTION_MENU.value
+            self.session_repo.save(session)
+            return self._generated_lesson_action_reply(
+                session.temp_generated_lesson or "",
+                language,
+                prefix=self._text(language, "customize_pages_unavailable"),
+            )
+
+        selected_page = self.embedding_content_repo.resolve_page_choice(pages, text)
+        if not selected_page:
+            chapter_range = self._chapter_page_range(lesson, pages)
+            prefix = self._text(language, "customize_page_invalid", chapter_range=chapter_range)
+            if is_from_page:
+                return self._customize_from_page_prompt_reply(
+                    session=session,
+                    lesson=lesson,
+                    pages=pages,
+                    language=language,
+                    prefix=prefix,
+                )
+            return self._customize_to_page_prompt_reply(
+                session=session,
+                lesson=lesson,
+                pages=pages,
+                language=language,
+                prefix=prefix,
+            )
+
+        if is_from_page:
+            session.temp_customize_from_page = selected_page.display_page
+            session.temp_customize_to_page = None
+            session.current_state = ConversationState.NEW_LESSON_CUSTOMIZE_TO_PAGE.value
+            self.session_repo.save(session)
+            return self._customize_to_page_prompt_reply(
+                session=session,
+                lesson=lesson,
+                pages=pages,
+                language=language,
+            )
+
+        session.temp_customize_to_page = selected_page.display_page
+        self.session_repo.save(session)
+        return self._generate_customized_lesson(
+            session=session,
+            teacher=teacher,
+            lesson=lesson,
+            pages=pages,
+            language=language,
+        )
+
+    def _generate_customized_lesson(
+        self,
+        *,
+        session,
+        teacher,
+        lesson: EmbeddingLessonMatch,
+        pages: list[EmbeddingPageExtraction],
+        language: str,
+    ) -> ConversationReply:
+        from_page = self.embedding_content_repo.resolve_page_choice(pages, session.temp_customize_from_page)
+        to_page = self.embedding_content_repo.resolve_page_choice(pages, session.temp_customize_to_page)
+        chapter_range = self._chapter_page_range(lesson, pages)
+        if not from_page:
+            return self._customize_from_page_prompt_reply(
+                session=session,
+                lesson=lesson,
+                pages=pages,
+                language=language,
+                prefix=self._text(language, "customize_page_invalid", chapter_range=chapter_range),
+            )
+        if not to_page:
+            return self._customize_to_page_prompt_reply(
+                session=session,
+                lesson=lesson,
+                pages=pages,
+                language=language,
+                prefix=self._text(language, "customize_page_invalid", chapter_range=chapter_range),
+            )
+
+        page_indexes = {page.pdf_page_number: index for index, page in enumerate(pages)}
+        start_index = page_indexes[from_page.pdf_page_number]
+        end_index = page_indexes[to_page.pdf_page_number]
+        if start_index > end_index:
+            session.temp_customize_to_page = None
+            self.session_repo.save(session)
+            return self._customize_to_page_prompt_reply(
+                session=session,
+                lesson=lesson,
+                pages=pages,
+                language=language,
+                prefix=self._text(
+                    language,
+                    "customize_range_invalid",
+                    from_page=from_page.display_page,
+                    to_page=to_page.display_page,
+                ),
+            )
+
+        selected_pages = pages[start_index : end_index + 1]
+        is_contiguous = all(
+            current.pdf_page_number == previous.pdf_page_number + 1
+            for previous, current in zip(selected_pages, selected_pages[1:])
+        )
+        if not is_contiguous:
+            session.temp_customize_to_page = None
+            self.session_repo.save(session)
+            return self._customize_to_page_prompt_reply(
+                session=session,
+                lesson=lesson,
+                pages=pages,
+                language=language,
+                prefix=self._text(
+                    language,
+                    "customize_range_invalid",
+                    from_page=from_page.display_page,
+                    to_page=to_page.display_page,
+                ),
+            )
+
+        page_text_parts = [
+            f"Book Page {page.display_page}\n{page.text.strip()}"
+            for page in selected_pages
+            if page.text and page.text.strip()
+        ]
+        if not page_text_parts:
+            session.temp_customize_to_page = None
+            self.session_repo.save(session)
+            return self._customize_to_page_prompt_reply(
+                session=session,
+                lesson=lesson,
+                pages=pages,
+                language=language,
+                prefix=self._text(language, "customize_text_unavailable"),
+            )
+
+        original_subsection = self.embedding_content_repo.get_subsection_by_id(session.temp_content_subsection_id or "")
+        if not original_subsection:
+            original_subsection = EmbeddingSubsection(
+                id=session.temp_content_subsection_id or "customized-page-range",
+                document_id=lesson.document_id,
+                subsection_number=session.temp_lesson_subsection_number,
+                subsection_title=session.temp_lesson_subsection_title,
+                anchor_marker=session.temp_lesson_day_title,
+                pdf_start_page=from_page.pdf_page_number,
+                pdf_end_page=to_page.pdf_page_number,
+                printed_start_page=from_page.display_page,
+                printed_end_page=to_page.display_page,
+                page_numbers=[],
+                printed_page_numbers=[],
+                includes=[],
+                text="",
+                text_length_chars=0,
+                include_in_embeddings=True,
+                embedding_readiness="ready",
+                quality_flags=[],
+            )
+
+        printed_numbers = [
+            int(page.printed_page_number)
+            for page in selected_pages
+            if (page.printed_page_number or "").strip().isdigit()
+        ]
+        customized_subsection = EmbeddingSubsection(
+            id=original_subsection.id,
+            document_id=lesson.document_id,
+            subsection_number=original_subsection.subsection_number,
+            subsection_title=original_subsection.subsection_title,
+            anchor_marker=original_subsection.anchor_marker,
+            pdf_start_page=from_page.pdf_page_number,
+            pdf_end_page=to_page.pdf_page_number,
+            printed_start_page=from_page.display_page,
+            printed_end_page=to_page.display_page,
+            page_numbers=[page.pdf_page_number for page in selected_pages],
+            printed_page_numbers=printed_numbers,
+            includes=original_subsection.includes,
+            text="\n\n".join(page_text_parts),
+            text_length_chars=sum(len(part) for part in page_text_parts),
+            include_in_embeddings=True,
+            embedding_readiness="ready",
+            quality_flags=list(original_subsection.quality_flags or []),
+        )
+
+        lesson_grade = (session.temp_profile_grade or "").strip() or teacher.default_grade
+        lesson_subject = (session.temp_profile_subject or "").strip() or teacher.default_subject
+        requested_duration = session.temp_duration_minutes or 0
+        result = self.pdf_content_lesson_service.generate_day_lesson_plan(
+            lesson=lesson,
+            subsection=customized_subsection,
+            day_number=session.temp_lesson_day_number or 1,
+            teacher=teacher,
+            grade=lesson_grade,
+            subject=lesson_subject,
+            duration_minutes=requested_duration,
+        )
+
+        session.temp_generated_lesson = result.lesson_text
+        session.temp_duration_minutes = requested_duration or result.duration_minutes
+        session.temp_lesson_book_pages = customized_subsection.display_pages
+        session.temp_lesson_pdf_start_page = customized_subsection.pdf_start_page
+        session.temp_lesson_pdf_end_page = customized_subsection.pdf_end_page
+        session.temp_lesson_printed_start_page = customized_subsection.printed_start_page
+        session.temp_lesson_printed_end_page = customized_subsection.printed_end_page
+        session.temp_customize_from_page = from_page.display_page
+        session.temp_customize_to_page = to_page.display_page
+        session.temp_lesson_is_customized = True
+        session.temp_lesson_name = self._ensure_customized_lesson_name(
+            self._suggest_lesson_name(session.temp_topic, language)
+        )
+        session.current_state = ConversationState.NEW_LESSON_ACTION_MENU.value
+        self.session_repo.save(session)
+
+        log_event(
+            logger,
+            "lesson_customized_from_page_extractions",
+            teacher_id=getattr(teacher, "id", None),
+            chapter_id=lesson.chapter_id,
+            subsection_id=session.temp_content_subsection_id,
+            pdf_start_page=from_page.pdf_page_number,
+            pdf_end_page=to_page.pdf_page_number,
+            printed_start_page=from_page.display_page,
+            printed_end_page=to_page.display_page,
+            selected_page_count=len(selected_pages),
+            provider_used=result.provider_used,
+        )
+        return self._generated_lesson_action_reply(
+            result.lesson_text,
+            language,
+            prefix=self._text(language, "customized_lesson_prefix"),
+        )
+
     def _handle_new_lesson_confirm_save(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
         language = self._teacher_language(teacher, whatsapp_number)
         choice = normalize_choice(text)
 
         if choice in {"1", "yes", "save lesson", "save_lesson", "पाठ सेव करें"}:
-            suggested_name = self._suggest_lesson_name(session.temp_topic, language)
+            suggested_name = (session.temp_lesson_name or self._suggest_lesson_name(session.temp_topic, language)).strip()
+            if session.temp_lesson_is_customized:
+                suggested_name = self._ensure_customized_lesson_name(suggested_name)
             session.temp_lesson_name = suggested_name
             session.current_state = ConversationState.NEW_LESSON_CONFIRM_NAME.value
             self.session_repo.save(session)
@@ -1806,6 +2522,8 @@ class ConversationService:
 
     def _save_generated_lesson_with_name(self, session, teacher, lesson_name: str, language: str) -> ConversationReply:
         lesson_name = (lesson_name or "").strip()
+        if session.temp_lesson_is_customized and lesson_name:
+            lesson_name = self._ensure_customized_lesson_name(lesson_name)
         if not lesson_name:
             log_event(logger, "validation_failure", field="lesson_name", value=lesson_name)
             return self._reply(self._text(language, "lesson_name_invalid"), ConversationState.NEW_LESSON_NAME)
@@ -1824,9 +2542,14 @@ class ConversationService:
         )
         source_reference = {}
         if session.temp_content_subsection_id:
+            source_type = (
+                "pdf_to_embeddings_page_range"
+                if session.temp_lesson_is_customized
+                else "pdf_to_embeddings_subsection"
+            )
             source_reference = {
                 **(lesson_payload.get("source_reference") or {}),
-                "source_type": "pdf_to_embeddings_subsection",
+                "source_type": source_type,
                 "document_id": session.temp_content_document_id,
                 "document_key": session.temp_lesson_document_key,
                 "book_title": session.temp_lesson_book_title,
@@ -1847,8 +2570,14 @@ class ConversationService:
                 "resource_profile": "Resource-Limited",
                 "format_profile": "Detailed",
                 "topic_name": session.temp_topic or "",
+                "is_customized": bool(session.temp_lesson_is_customized),
+                "customized_page_range": {
+                    "from_page": session.temp_customize_from_page,
+                    "to_page": session.temp_customize_to_page,
+                } if session.temp_lesson_is_customized else None,
             }
-            lesson_payload["source_type"] = "pdf_to_embeddings_subsection"
+            lesson_payload["source_type"] = source_type
+            lesson_payload["is_customized"] = bool(session.temp_lesson_is_customized)
             lesson_payload["source_reference"] = source_reference
 
         lesson = self.lesson_repo.create_or_update_by_policy(
