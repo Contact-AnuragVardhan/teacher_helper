@@ -21,6 +21,7 @@ from app.services.subject_resolver import SubjectResolver
 from app.state_machine.states import ConversationState
 from app.utils.lesson_title_localization import localize_lesson_display_title
 from app.utils.profile_validation import validate_profile_grade, validate_profile_subject
+from app.utils.subject_normalization import normalize_subject, subject_display_name
 from app.utils.text import clean_text, normalize_choice, normalize_grade, parse_duration_minutes
 
 logger = get_logger(__name__)
@@ -831,11 +832,15 @@ class ConversationService:
         day_title = session.temp_lesson_day_title or (
             f"Day {session.temp_lesson_day_number}" if session.temp_lesson_day_number else ""
         )
+        pdf_subject = subject_display_name(
+            normalize_subject(session.temp_profile_subject or getattr(teacher, "default_subject", "") or ""),
+            language=language,
+        )
         metadata = LessonPdfMetadata(
             teacher_name=getattr(teacher, "teacher_name", "") or "",
             school_name=session.temp_lesson_school_name or getattr(teacher, "school_name", "") or "",
             grade=session.temp_profile_grade or getattr(teacher, "default_grade", "") or "",
-            subject=session.temp_profile_subject or getattr(teacher, "default_subject", "") or "",
+            subject=pdf_subject,
             duration_minutes=session.temp_duration_minutes,
             book_title=session.temp_lesson_book_title or "",
             chapter_title=session.temp_lesson_chapter_title or session.temp_topic or "",
@@ -843,6 +848,7 @@ class ConversationService:
             day_title=day_title,
             pages=session.temp_lesson_book_pages or "",
             is_customized=bool(session.temp_lesson_is_customized),
+            preferred_language=language,
         )
 
         try:
@@ -1870,6 +1876,7 @@ class ConversationService:
             grade=lesson_grade,
             subject=lesson_subject,
             duration_minutes=requested_duration,
+            preferred_language=language,
         )
         session.temp_content_subsection_id = subsection.id
         session.temp_lesson_day_number = day_number
@@ -2037,6 +2044,7 @@ class ConversationService:
             grade=lesson_grade,
             subject=lesson_subject,
             duration_minutes=duration,
+            preferred_language=language,
         )
         session.temp_topic = lesson_match.title
         session.temp_content_document_id = lesson_match.document_id
@@ -2417,6 +2425,7 @@ class ConversationService:
             grade=lesson_grade,
             subject=lesson_subject,
             duration_minutes=requested_duration,
+            preferred_language=language,
         )
 
         session.temp_generated_lesson = result.lesson_text
