@@ -1,7 +1,7 @@
 from dataclasses import dataclass, field
 
 from app.core.config import get_settings
-from app.core.language import DEFAULT_LANGUAGE, language_key, normalize_language
+from app.core.language import DEFAULT_LANGUAGE, generation_language_instruction, language_key, normalize_language
 from app.core.logging import get_logger, log_event
 from app.services.lesson_generation_provider import PromptBundle
 from app.utils.subject_normalization import subject_display_name
@@ -136,20 +136,7 @@ class PromptBuilder:
         )
 
     def _language_instruction(self, preferred_language: str) -> str:
-        key = language_key(preferred_language)
-        if key == "hinglish":
-            return (
-                "Write all visible generated content in simple Hinglish using Roman script only. "
-                "Do not use Devanagari. Use natural teacher-friendly Indian classroom wording with a light Hindi-English mix. "
-                "Keep labels short and WhatsApp-friendly."
-            )
-        if key == "hindi":
-            return (
-                "Write all visible generated lesson content in simple Hindi using Devanagari script only. "
-                "Do not write Roman Hindi or Hinglish. Translate section headings, labels, bullets, teaching tips, prompts, and the subject metadata value into Hindi/Devanagari. "
-                "Keep any URLs unchanged."
-            )
-        return "Write all visible generated content in clear, simple English."
+        return generation_language_instruction(preferred_language)
 
     def _response_shape(
         self,

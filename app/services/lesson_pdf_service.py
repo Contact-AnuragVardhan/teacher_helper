@@ -26,6 +26,7 @@ from reportlab.platypus import (
 )
 
 from app.core.config import Settings
+from app.core.language import language_key, normalize_language
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,7 @@ class LessonPdfMetadata:
     day_title: str = ""
     pages: str = ""
     is_customized: bool = False
+    preferred_language: str = "English"
 
 
 @dataclass(frozen=True)
@@ -69,7 +71,21 @@ class LessonPdfService:
         if not normalized_lesson:
             raise ValueError("Generated lesson text is empty.")
 
-        font_name, bold_font_name, shaping = self._register_fonts(normalized_lesson)
+        labels = self._labels_for_language(metadata.preferred_language)
+        font_probe = "\n".join(
+            [
+                normalized_lesson,
+                metadata.teacher_name,
+                metadata.school_name,
+                metadata.subject,
+                metadata.book_title,
+                metadata.chapter_title,
+                metadata.section_title,
+                metadata.day_title,
+                *labels.values(),
+            ]
+        )
+        font_name, bold_font_name, shaping = self._register_fonts(font_probe)
         styles = self._build_styles(font_name, bold_font_name, shaping)
 
         buffer = BytesIO()
@@ -80,9 +96,9 @@ class LessonPdfService:
             leftMargin=17 * mm,
             topMargin=18 * mm,
             bottomMargin=18 * mm,
-            title="Teacher Helper - Detailed Lesson Plan",
+            title=f"Teacher Helper - {labels['title']}",
             author="Teacher Helper",
-            subject="Generated lesson plan",
+            subject=labels["document_subject"],
         )
 
         frame = Frame(
@@ -102,6 +118,7 @@ class LessonPdfService:
                         doc,
                         font_name=font_name,
                         bold_font_name=bold_font_name,
+                        page_label=labels["page"],
                     ),
                 )
             ]
@@ -109,9 +126,9 @@ class LessonPdfService:
 
         story = [
             Paragraph("Teacher Helper", styles["brand"]),
-            Paragraph("Detailed Lesson Plan", styles["title"]),
+            Paragraph(labels["title"], styles["title"]),
             Spacer(1, 3 * mm),
-            self._metadata_table(metadata, styles),
+            self._metadata_table(metadata, styles, labels),
             Spacer(1, 5 * mm),
         ]
         story.extend(self._lesson_flowables(normalized_lesson, styles))
@@ -125,6 +142,50 @@ class LessonPdfService:
             filename=self._build_filename(metadata),
             content=pdf_bytes,
         )
+
+    @staticmethod
+    def _labels_for_language(preferred_language: str) -> dict[str, str]:
+        key = language_key(normalize_language(preferred_language) or "English")
+        if key == "hindi":
+            return {
+                "title": "विस्तृत पाठ योजना",
+                "document_subject": "तैयार की गई पाठ योजना",
+                "teacher": "शिक्षक",
+                "school": "विद्यालय",
+                "grade": "ग्रेड / कक्षा",
+                "subject": "विषय",
+                "duration": "अवधि",
+                "minutes": "मिनट",
+                "book": "पुस्तक",
+                "chapter": "अध्याय",
+                "section": "खंड",
+                "day": "दिन",
+                "book_pages": "पुस्तक पृष्ठ",
+                "lesson_type": "पाठ प्रकार",
+                "customized": "अनुकूलित",
+                "generated": "तैयार किया गया",
+                "page": "पृष्ठ",
+            }
+        # Hinglish uses Roman script and keeps concise structural labels in English.
+        return {
+            "title": "Detailed Lesson Plan",
+            "document_subject": "Generated lesson plan",
+            "teacher": "Teacher",
+            "school": "School",
+            "grade": "Grade / Class",
+            "subject": "Subject",
+            "duration": "Duration",
+            "minutes": "minutes",
+            "book": "Book",
+            "chapter": "Chapter",
+            "section": "Section",
+            "day": "Day",
+            "book_pages": "Book Pages",
+            "lesson_type": "Lesson Type",
+            "customized": "Customized",
+            "generated": "Generated",
+            "page": "Page",
+        }
 
     def _register_fonts(self, text: str) -> tuple[str, str, bool]:
         uses_devanagari = bool(self._DEVANAGARI_RE.search(text))
@@ -271,19 +332,28 @@ class LessonPdfService:
             ),
         }
 
-    def _metadata_table(self, metadata: LessonPdfMetadata, styles: dict[str, ParagraphStyle]) -> Table:
+    def _metadata_table(
+        self,
+        metadata: LessonPdfMetadata,
+        styles: dict[str, ParagraphStyle],
+        labels: dict[str, str],
+    ) -> Table:
+        duration_value = (
+            f"{metadata.duration_minutes} {labels['minutes']}" if metadata.duration_minutes else ""
+        )
+        day_value = self._localized_day_value(metadata.day_title, metadata.preferred_language)
         rows = [
-            ("Teacher", metadata.teacher_name),
-            ("School", metadata.school_name),
-            ("Grade / Class", metadata.grade),
-            ("Subject", metadata.subject),
-            ("Duration", f"{metadata.duration_minutes} minutes" if metadata.duration_minutes else ""),
-            ("Book", metadata.book_title),
-            ("Chapter", metadata.chapter_title or metadata.section_title),
-            ("Section", metadata.section_title if metadata.section_title != metadata.chapter_title else ""),
-            ("Day", metadata.day_title),
-            ("Book Pages", metadata.pages),
-            ("Lesson Type", "Customized" if metadata.is_customized else "Generated"),
+            (labels["teacher"], metadata.teacher_name),
+            (labels["school"], metadata.school_name),
+            (labels["grade"], metadata.grade),
+            (labels["subject"], metadata.subject),
+            (labels["duration"], duration_value),
+            (labels["book"], metadata.book_title),
+            (labels["chapter"], metadata.chapter_title or metadata.section_title),
+            (labels["section"], metadata.section_title if metadata.section_title != metadata.chapter_title else ""),
+            (labels["day"], day_value),
+            (labels["book_pages"], metadata.pages),
+            (labels["lesson_type"], labels["customized"] if metadata.is_customized else labels["generated"]),
         ]
         filtered_rows = [(label, value) for label, value in rows if str(value or "").strip()]
         data = [
@@ -310,6 +380,14 @@ class LessonPdfService:
             )
         )
         return table
+
+    @staticmethod
+    def _localized_day_value(day_title: str, preferred_language: str) -> str:
+        value = (day_title or "").strip()
+        if language_key(preferred_language) != "hindi":
+            return value
+        match = re.fullmatch(r"Day\s+(\d+)", value, flags=re.IGNORECASE)
+        return f"दिन {match.group(1)}" if match else value
 
     def _lesson_flowables(self, text: str, styles: dict[str, ParagraphStyle]) -> list:
         flowables: list = []
@@ -411,7 +489,14 @@ class LessonPdfService:
         return f"{source[:90] or 'Teacher_Helper_Lesson_Plan'}.pdf"
 
     @staticmethod
-    def _draw_page_decorations(canvas, doc, *, font_name: str, bold_font_name: str) -> None:
+    def _draw_page_decorations(
+        canvas,
+        doc,
+        *,
+        font_name: str,
+        bold_font_name: str,
+        page_label: str = "Page",
+    ) -> None:
         canvas.saveState()
         page_width, _ = A4
         canvas.setStrokeColor(colors.HexColor("#E5E7EB"))
@@ -421,5 +506,5 @@ class LessonPdfService:
         canvas.setFillColor(colors.HexColor("#6B7280"))
         canvas.drawString(doc.leftMargin, 7.5 * mm, "Teacher Helper")
         canvas.setFont(bold_font_name, 8)
-        canvas.drawRightString(page_width - doc.rightMargin, 7.5 * mm, f"Page {doc.page}")
+        canvas.drawRightString(page_width - doc.rightMargin, 7.5 * mm, f"{page_label} {doc.page}")
         canvas.restoreState()
