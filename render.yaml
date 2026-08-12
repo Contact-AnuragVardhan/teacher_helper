@@ -52,3 +52,12 @@ services:
         value: "v25.0"
       - key: WHATSAPP_API_TIMEOUT_SECONDS
         value: "15"
+
+      - key: LESSON_PDF_FONT_PATH
+        value: "assets/fonts/FreeSans.ttf"
+      - key: LESSON_PDF_BOLD_FONT_PATH
+        value: "assets/fonts/FreeSansBold.ttf"
+      - key: LESSON_PDF_DEVANAGARI_FONT_PATH
+        value: "assets/fonts/FreeSans.ttf"
+      - key: LESSON_PDF_DEVANAGARI_BOLD_FONT_PATH
+        value: "assets/fonts/FreeSansBold.ttf"
