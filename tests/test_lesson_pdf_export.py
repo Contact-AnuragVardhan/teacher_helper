@@ -136,3 +136,43 @@ def test_mock_webhook_public_outbound_omits_pdf_base64():
     document = public["messages"][0]
     assert "content_base64" not in document
     assert document["content_base64_omitted"] is True
+
+
+
+def test_pdf_symbol_cleanup_removes_decorative_emoji_and_preserves_math_and_hindi():
+    settings = Settings(database_url="sqlite://")
+    service = LessonPdfService(settings)
+
+    cleaned = service._strip_unsupported_symbols(
+        "📚 ⏱ ⭐ ✅ 👩‍🏫 ax² + bx + c = 0; "
+        "a ≠ 0; x ≤ 5; y ≥ 2; √9; ± × ÷; द्विघात समीकरण"
+    )
+
+    assert "📚" not in cleaned
+    assert "⏱" not in cleaned
+    assert "⭐" not in cleaned
+    assert "✅" not in cleaned
+    assert "👩" not in cleaned
+    assert "🏫" not in cleaned
+
+    assert "ax² + bx + c = 0" in cleaned
+    assert "a ≠ 0" in cleaned
+    assert "x ≤ 5" in cleaned
+    assert "y ≥ 2" in cleaned
+    assert "√9" in cleaned
+    assert "± × ÷" in cleaned
+    assert "द्विघात समीकरण" in cleaned
+
+
+def test_pdf_whatsapp_bold_line_becomes_heading_without_literal_asterisks():
+    settings = Settings(database_url="sqlite://")
+    service = LessonPdfService(settings)
+    styles = service._build_styles("Helvetica", "Helvetica-Bold", False)
+
+    flowables = service._lesson_flowables(
+        "*⭐ Teacher Quick View*\nAaj hum concepts ko samjhenge.",
+        styles,
+    )
+
+    assert flowables[0].style.name == "LessonHeading"
+    assert flowables[0].getPlainText() == "Teacher Quick View"

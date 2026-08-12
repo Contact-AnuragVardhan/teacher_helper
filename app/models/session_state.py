@@ -42,6 +42,9 @@ class SessionState(Base):
     temp_customize_from_page: Mapped[str | None] = mapped_column(String(100), nullable=True)
     temp_customize_to_page: Mapped[str | None] = mapped_column(String(100), nullable=True)
     temp_lesson_is_customized: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    temp_feedback_survey_key: Mapped[str | None] = mapped_column(String(140), nullable=True)
+    temp_feedback_question_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    temp_feedback_answers_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,

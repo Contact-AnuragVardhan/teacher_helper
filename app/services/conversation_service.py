@@ -1,5 +1,6 @@
 from dataclasses import dataclass, replace
 import base64
+import json
 from datetime import datetime
 import re
 
@@ -9,9 +10,11 @@ from app.core.config import get_settings
 from app.core.language import DEFAULT_LANGUAGE, language_key, normalize_language
 from app.core.logging import get_logger, log_event
 from app.repositories.embedding_content_repository import EmbeddingContentRepository, EmbeddingLessonMatch, EmbeddingPageExtraction, EmbeddingSubsection
+from app.repositories.feedback_repository import FeedbackRepository
 from app.repositories.lesson_repository import AccessibleLessonSummary, LessonRepository
 from app.repositories.session_repository import SessionRepository
 from app.repositories.teacher_repository import TeacherRepository
+from app.services.feedback_survey_service import FeedbackSurveyService
 from app.services.lesson_generator import LessonGeneratorService
 from app.services.lesson_payload_builder import LessonPayloadBuilder
 from app.services.lesson_pdf_service import LessonPdfMetadata, LessonPdfService
@@ -38,13 +41,22 @@ TEXT: dict[str, dict[str, str]] = {
     "hindi": {
         "tap_option": "कृपया नीचे एक विकल्प चुनें।",
         "welcome": "नमस्ते! Teacher Helper में आपका स्वागत है। मैं पाठ योजना बनाने, सेव करने और देखने में मदद कर सकता हूँ।",
-        "main_menu_unknown": "मैं नया पाठ बनाने, सेव किए गए पाठ देखने या प्रोफ़ाइल अपडेट करने में मदद कर सकता हूँ। कृपया नीचे दिए गए विकल्पों में से एक चुनें।",
+        "main_menu_unknown": "मैं नया पाठ बनाने, सेव किए गए पाठ देखने, प्रोफ़ाइल अपडेट करने या फीडबैक देने में मदद कर सकता हूँ। कृपया नीचे दिए गए विकल्पों में से एक चुनें।",
         "main_header": "Teacher Helper",
         "main_body": "एक विकल्प चुनें",
         "main_footer": "नीचे एक विकल्प टैप करें",
         "btn_new_lesson": "नया पाठ",
         "btn_all_lessons": "सभी पाठ",
         "btn_profile": "प्रोफ़ाइल",
+        "btn_feedback": "फीडबैक",
+        "main_menu_button": "मेनू",
+        "main_menu_section": "Teacher Helper",
+        "feedback_intro": "कृपया इस सप्ताह की Lesson Plans के बारे में छोटा फीडबैक दें। अंतिम जवाब के बाद आपके जवाब सेव हो जाएंगे।",
+        "feedback_choice_invalid": "कृपया Yes, Sometimes या No चुनें।",
+        "feedback_text_invalid": "कृपया इस प्रश्न का छोटा जवाब लिखें।",
+        "feedback_short_answer_instruction": "कृपया अपना छोटा जवाब लिखें।",
+        "feedback_saved": "धन्यवाद। आपका फीडबैक सेव हो गया है।",
+        "feedback_unavailable": "फीडबैक फॉर्म अभी उपलब्ध नहीं है। कृपया बाद में फिर कोशिश करें।",
         "btn_main_menu": "मुख्य मेनू",
         "all_lessons_body_page": "खोलने के लिए पाठ चुनें। पेज {page}/{total_pages}",
         "all_lessons_next": "अगला पेज",
@@ -180,13 +192,22 @@ TEXT: dict[str, dict[str, str]] = {
     "english": {
         "tap_option": "Please tap one option below.",
         "welcome": "Hello! Welcome to Teacher Helper. I can help you create, save, and view lesson plans.",
-        "main_menu_unknown": "I can help with creating a new lesson, viewing all saved lessons, or updating your profile. Please choose one of the options below.",
+        "main_menu_unknown": "I can help with creating a new lesson, viewing saved lessons, updating your profile, or giving feedback. Please choose one of the options below.",
         "main_header": "Teacher Helper",
         "main_body": "Choose an option",
         "main_footer": "Tap one option below",
         "btn_new_lesson": "New Lesson",
         "btn_all_lessons": "All Lessons",
         "btn_profile": "My Profile",
+        "btn_feedback": "Feedback",
+        "main_menu_button": "Menu",
+        "main_menu_section": "Teacher Helper",
+        "feedback_intro": "Please answer this short weekly Lesson Plan feedback. Your answers will be saved after the final question.",
+        "feedback_choice_invalid": "Please choose Yes, Sometimes, or No.",
+        "feedback_text_invalid": "Please type a short answer for this question.",
+        "feedback_short_answer_instruction": "Please type your short answer.",
+        "feedback_saved": "Thank you. Your feedback has been saved.",
+        "feedback_unavailable": "The feedback form is temporarily unavailable. Please try again later.",
         "btn_main_menu": "Back to Main Menu",
         "all_lessons_body_page": "Choose a lesson to open. Page {page}/{total_pages}.",
         "all_lessons_next": "Next Page",
@@ -322,13 +343,22 @@ TEXT: dict[str, dict[str, str]] = {
     "hinglish": {
         "tap_option": "Neeche ek option tap karein.",
         "welcome": "Namaste! Teacher Helper mein welcome. Main lesson plans create, save aur view karne mein help kar sakta hoon.",
-        "main_menu_unknown": "Main new lesson create karne, saved lessons dekhne, ya profile update karne mein help kar sakta hoon. Neeche se ek option choose karein.",
+        "main_menu_unknown": "Main new lesson create karne, saved lessons dekhne, profile update karne, ya feedback dene mein help kar sakta hoon. Neeche se ek option choose karein.",
         "main_header": "Teacher Helper",
         "main_body": "Option choose karein",
         "main_footer": "Neeche option tap karein",
         "btn_new_lesson": "Naya Lesson",
         "btn_all_lessons": "All Lessons",
         "btn_profile": "Profile",
+        "btn_feedback": "Feedback",
+        "main_menu_button": "Menu",
+        "main_menu_section": "Teacher Helper",
+        "feedback_intro": "Please is week ke Lesson Plans par short feedback dein. Final answer ke baad aapke answers save ho jayenge.",
+        "feedback_choice_invalid": "Please Yes, Sometimes, ya No choose karein.",
+        "feedback_text_invalid": "Please is question ka short answer type karein.",
+        "feedback_short_answer_instruction": "Please apna short answer type karein.",
+        "feedback_saved": "Thank you. Aapka feedback save ho gaya hai.",
+        "feedback_unavailable": "Feedback form abhi available nahi hai. Please baad mein phir try karein.",
         "btn_main_menu": "Main Menu",
         "all_lessons_body_page": "Open karne ke liye lesson choose karein. Page {page}/{total_pages}.",
         "all_lessons_next": "Next Page",
@@ -469,9 +499,11 @@ class ConversationService:
         self.db = db
         self.settings = get_settings()
         self.teacher_repo = TeacherRepository(db)
+        self.feedback_repo = FeedbackRepository(db)
         self.lesson_repo = LessonRepository(db)
         self.embedding_content_repo = EmbeddingContentRepository(db)
         self.session_repo = SessionRepository(db)
+        self.feedback_survey_service = FeedbackSurveyService()
         self.lesson_generator = LessonGeneratorService(db)
         self.pdf_content_lesson_service = PdfContentLessonService(db)
         self.lesson_payload_builder = LessonPayloadBuilder()
@@ -519,6 +551,7 @@ class ConversationService:
             ConversationState.LESSON_ACTION_MENU: self._handle_lesson_action_menu,
             ConversationState.SHARE_LESSON_PHONE: self._handle_share_lesson_phone,
             ConversationState.DELETE_LESSON_CONFIRM: self._handle_delete_lesson_confirm,
+            ConversationState.FEEDBACK_QUESTION: self._handle_feedback_question,
         }
 
         result = handler_map[state](session, whatsapp_number, text)
@@ -754,15 +787,20 @@ class ConversationService:
         )
 
     def _main_menu_outbound(self, language: str) -> dict:
+        # WhatsApp reply-button messages support at most 3 buttons. The main menu
+        # now has 4 choices, so use a list message to keep every option tappable.
         return {
-            "type": "buttons",
+            "type": "list",
             "header": self._text(language, "main_header"),
             "body": self._text(language, "main_body"),
+            "button_text": self._text(language, "main_menu_button"),
+            "section_title": self._text(language, "main_menu_section"),
             "footer": self._text(language, "main_footer"),
-            "buttons": [
+            "rows": [
                 {"id": "menu_new_lesson", "title": self._text(language, "btn_new_lesson")},
                 {"id": "menu_all_lessons", "title": self._text(language, "btn_all_lessons")},
                 {"id": "menu_my_profile", "title": self._text(language, "btn_profile")},
+                {"id": "menu_feedback", "title": self._text(language, "btn_feedback")},
             ],
         }
 
@@ -1529,6 +1567,201 @@ class ConversationService:
             },
         )
 
+    def _feedback_survey_or_none(self, language: str):
+        try:
+            return self.feedback_survey_service.load()
+        except Exception as exc:  # pragma: no cover - defensive configuration handling.
+            log_event(logger, "feedback_survey_unavailable", error=str(exc))
+            return None
+
+    @staticmethod
+    def _feedback_answers(session) -> dict[str, str]:
+        raw = (getattr(session, "temp_feedback_answers_json", None) or "").strip()
+        if not raw:
+            return {}
+        try:
+            payload = json.loads(raw)
+        except (TypeError, ValueError):
+            return {}
+        if not isinstance(payload, dict):
+            return {}
+        return {str(key): str(value) for key, value in payload.items()}
+
+    @staticmethod
+    def _feedback_choice_id(text: str) -> str | None:
+        choice = normalize_choice(text)
+        if choice.startswith("feedback_answer:"):
+            value = choice.split(":", 1)[1].strip()
+            return value if value in {"yes", "sometimes", "no"} else None
+
+        aliases = {
+            "yes": "yes",
+            "y": "yes",
+            "1": "yes",
+            "haan": "yes",
+            "ha": "yes",
+            "हाँ": "yes",
+            "sometimes": "sometimes",
+            "sometime": "sometimes",
+            "2": "sometimes",
+            "kabhi kabhi": "sometimes",
+            "कभी कभी": "sometimes",
+            "कभी-कभी": "sometimes",
+            "no": "no",
+            "n": "no",
+            "3": "no",
+            "nahi": "no",
+            "nahin": "no",
+            "नहीं": "no",
+        }
+        return aliases.get(choice)
+
+    def _feedback_question_reply(
+        self,
+        *,
+        survey,
+        question_index: int,
+        language: str,
+        include_intro: bool = False,
+        validation_message: str | None = None,
+    ) -> ConversationReply:
+        questions = survey.flattened_questions()
+        if not questions:
+            return self._main_menu_reply(self._text(language, "feedback_unavailable"), language)
+
+        question_index = max(0, min(question_index, len(questions) - 1))
+        part, question = questions[question_index]
+        question_text = f"{part.title}\n\n{question.number}. {question.text}"
+
+        prefix_parts: list[str] = []
+        if include_intro:
+            prefix_parts.append(self._text(language, "feedback_intro"))
+        if validation_message:
+            prefix_parts.append(validation_message)
+
+        if question.type == "choice":
+            # The question itself is shown in the interactive button message.
+            reply = "\n\n".join(prefix_parts).strip()
+            return self._reply(
+                reply,
+                ConversationState.FEEDBACK_QUESTION,
+                outbound={
+                    "type": "buttons",
+                    "header": survey.title,
+                    "body": question_text,
+                    "footer": f"Answer Format: {survey.choice_answer_format}",
+                    "buttons": [
+                        {"id": f"feedback_answer:{option.id}", "title": option.label}
+                        for option in survey.choice_options
+                    ],
+                },
+            )
+
+        instruction = self._text(language, "feedback_short_answer_instruction")
+        text_parts = [part.title, f"{question.number}. {question.text}", instruction]
+        if include_intro:
+            text_parts.insert(0, self._text(language, "feedback_intro"))
+        if validation_message:
+            text_parts.insert(0, validation_message)
+        return self._reply(
+            "\n\n".join(item for item in text_parts if item),
+            ConversationState.FEEDBACK_QUESTION,
+        )
+
+    def _start_feedback(self, session, teacher, whatsapp_number: str, language: str) -> ConversationReply:
+        survey = self._feedback_survey_or_none(language)
+        if survey is None:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply(self._text(language, "feedback_unavailable"), language)
+
+        session.temp_feedback_survey_key = survey.key
+        session.temp_feedback_question_index = 0
+        session.temp_feedback_answers_json = "{}"
+        session.current_state = ConversationState.FEEDBACK_QUESTION.value
+        self.session_repo.save(session)
+        log_event(
+            logger,
+            "feedback_started",
+            teacher_id=teacher.id,
+            whatsapp_number=whatsapp_number,
+            survey_id=survey.survey_id,
+            survey_version=survey.version,
+        )
+        return self._feedback_question_reply(
+            survey=survey,
+            question_index=0,
+            language=language,
+            include_intro=True,
+        )
+
+    def _handle_feedback_question(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+        language = self._teacher_language(teacher, whatsapp_number)
+        if not teacher:
+            self.session_repo.reset_for_main_menu(session)
+            session.current_state = ConversationState.PROFILE_NAME.value
+            self.session_repo.save(session)
+            return self._reply(self._text(language, "new_lesson_without_profile"), ConversationState.PROFILE_NAME)
+
+        survey = self._feedback_survey_or_none(language)
+        if survey is None:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply(self._text(language, "feedback_unavailable"), language)
+
+        if session.temp_feedback_survey_key != survey.key:
+            return self._start_feedback(session, teacher, whatsapp_number, language)
+
+        questions = survey.flattened_questions()
+        question_index = session.temp_feedback_question_index or 0
+        if question_index < 0 or question_index >= len(questions):
+            return self._start_feedback(session, teacher, whatsapp_number, language)
+
+        _, question = questions[question_index]
+        answers = self._feedback_answers(session)
+
+        if question.type == "choice":
+            option_id = self._feedback_choice_id(text)
+            option_lookup = {option.id: option.label for option in survey.choice_options}
+            if option_id not in option_lookup:
+                return self._feedback_question_reply(
+                    survey=survey,
+                    question_index=question_index,
+                    language=language,
+                    validation_message=self._text(language, "feedback_choice_invalid"),
+                )
+            answers[question.id] = option_lookup[option_id]
+        else:
+            answer_text = clean_text(text)
+            if question.required and not answer_text:
+                return self._feedback_question_reply(
+                    survey=survey,
+                    question_index=question_index,
+                    language=language,
+                    validation_message=self._text(language, "feedback_text_invalid"),
+                )
+            answers[question.id] = answer_text
+
+        next_index = question_index + 1
+        if next_index >= len(questions):
+            self.feedback_repo.create_submission(
+                teacher=teacher,
+                whatsapp_number=whatsapp_number,
+                survey=survey,
+                answers=answers,
+            )
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply(self._text(language, "feedback_saved"), language)
+
+        session.temp_feedback_question_index = next_index
+        session.temp_feedback_answers_json = json.dumps(answers, ensure_ascii=False)
+        session.current_state = ConversationState.FEEDBACK_QUESTION.value
+        self.session_repo.save(session)
+        return self._feedback_question_reply(
+            survey=survey,
+            question_index=next_index,
+            language=language,
+        )
+
     def _handle_main_menu(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
         language = self._teacher_language(teacher, whatsapp_number)
@@ -1584,6 +1817,13 @@ class ConversationService:
 
             self.session_repo.save(session)
             return self._reply(self._text(language, "profile_start"), ConversationState.PROFILE_NAME)
+
+        if choice in {"4", "feedback", "menu_feedback", "फीडबैक"}:
+            if not teacher:
+                session.current_state = ConversationState.PROFILE_NAME.value
+                self.session_repo.clear_temp_profile(session)
+                return self._reply(self._text(language, "new_lesson_without_profile"), ConversationState.PROFILE_NAME)
+            return self._start_feedback(session, teacher, whatsapp_number, language)
 
         return self._main_menu_reply(self._text(language, "main_menu_unknown"), language)
 

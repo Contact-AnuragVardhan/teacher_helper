@@ -35,3 +35,8 @@ class TeacherProfile(Base):
         foreign_keys="LessonShare.shared_with_teacher_id",
         back_populates="shared_with_teacher",
     )
+    feedback_submissions = relationship(
+        "FeedbackSubmission",
+        back_populates="teacher",
+        cascade="all, delete-orphan",
+    )

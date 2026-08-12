@@ -1,8 +1,8 @@
 MAIN_MENU = """Reply with:
 1 → New Lesson
-2 → My Lessons
-3 → All Lessons
-4 → My Profile"""
+2 → All Lessons
+3 → My Profile
+4 → Feedback"""
 
 SAVE_MENU = """Reply:
 1 → Save Lesson

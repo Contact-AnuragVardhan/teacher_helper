@@ -36,6 +36,9 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
         "temp_customize_from_page": "VARCHAR(100)",
         "temp_customize_to_page": "VARCHAR(100)",
         "temp_lesson_is_customized": "BOOLEAN DEFAULT FALSE",
+        "temp_feedback_survey_key": "VARCHAR(140)",
+        "temp_feedback_question_index": "INTEGER",
+        "temp_feedback_answers_json": "TEXT",
     },
     "lesson_plan": {
         "document_id": "VARCHAR(80)",

@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
+import logging
 import re
 import unicodedata
 from xml.sax.saxutils import escape
@@ -27,6 +28,9 @@ from reportlab.platypus import (
 
 from app.core.config import Settings
 from app.core.language import language_key, normalize_language
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -57,6 +61,7 @@ class LessonPdfService:
     _DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
     _BULLET_RE = re.compile(r"^\s*(?:[-*•▪◦]|\d+[.)])\s+(.*)$")
     _MARKDOWN_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*)$")
+    _WHATSAPP_BOLD_LINE_RE = re.compile(r"^\*(?!\s)(.+?)\*$")
 
     def __init__(self, settings: Settings):
         self.settings = settings
@@ -188,52 +193,93 @@ class LessonPdfService:
         }
 
     def _register_fonts(self, text: str) -> tuple[str, str, bool]:
+        """Register the best available font without making PDF generation fail.
+
+        For lessons containing Devanagari, prefer a mixed-script Unicode font
+        (FreeSans) so a single paragraph can safely contain Hindi, English and
+        common mathematical symbols such as ², ≠, ≤, ≥ and √.
+        """
         uses_devanagari = bool(self._DEVANAGARI_RE.search(text))
+        project_font_dir = Path(__file__).resolve().parents[2] / "assets" / "fonts"
 
         if uses_devanagari:
             regular_candidates = [
                 self.settings.lesson_pdf_devanagari_font_path,
+                str(project_font_dir / "FreeSans.ttf"),
+                self.settings.lesson_pdf_font_path,
+                "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+                "/usr/local/share/fonts/FreeSans.ttf",
+                # Keep Devanagari-specific fonts only as later fallbacks. A bundled
+                # FreeSans is preferred because lesson text is usually mixed-script.
                 "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf",
                 "/usr/local/share/fonts/NotoSansDevanagari-Regular.ttf",
             ]
             bold_candidates = [
                 self.settings.lesson_pdf_devanagari_bold_font_path,
+                str(project_font_dir / "FreeSansBold.ttf"),
+                self.settings.lesson_pdf_bold_font_path,
+                "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
+                "/usr/local/share/fonts/FreeSansBold.ttf",
                 "/usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf",
                 "/usr/local/share/fonts/NotoSansDevanagari-Bold.ttf",
             ]
-            prefix = "TeacherHelperDevanagari"
+            prefix = "TeacherHelperUnicode"
         else:
             regular_candidates = [
                 self.settings.lesson_pdf_font_path,
+                str(project_font_dir / "FreeSans.ttf"),
                 "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
                 "/usr/local/share/fonts/NotoSans-Regular.ttf",
+                "/usr/local/share/fonts/FreeSans.ttf",
             ]
             bold_candidates = [
                 self.settings.lesson_pdf_bold_font_path,
+                str(project_font_dir / "FreeSansBold.ttf"),
                 "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
                 "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+                "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf",
                 "/usr/local/share/fonts/NotoSans-Bold.ttf",
+                "/usr/local/share/fonts/FreeSansBold.ttf",
             ]
             prefix = "TeacherHelperSans"
 
         regular_path = self._first_existing_path(regular_candidates)
         bold_path = self._first_existing_path(bold_candidates)
+
         if regular_path:
             regular_name = f"{prefix}-Regular"
             bold_name = f"{prefix}-Bold"
+
             if regular_name not in pdfmetrics.getRegisteredFontNames():
                 pdfmetrics.registerFont(TTFont(regular_name, regular_path))
-            if bold_path and bold_name not in pdfmetrics.getRegisteredFontNames():
-                pdfmetrics.registerFont(TTFont(bold_name, bold_path))
-            elif not bold_path:
+
+            if bold_path:
+                if bold_name not in pdfmetrics.getRegisteredFontNames():
+                    pdfmetrics.registerFont(TTFont(bold_name, bold_path))
+            else:
+                # A missing bold font must never prevent PDF generation.
                 bold_name = regular_name
 
+            # Shaping is desirable for Devanagari. If uharfbuzz is unexpectedly
+            # unavailable, continue rather than failing the Print Lesson flow.
             shaping = uses_devanagari and self._harfbuzz_available()
+            if uses_devanagari and not shaping:
+                logger.warning(
+                    "Devanagari text detected but uharfbuzz is unavailable; "
+                    "PDF generation will continue without shaping."
+                )
+
             return regular_name, bold_name, shaping
 
-        # Helvetica is safe for English/Hinglish. For Devanagari deployments,
-        # configure LESSON_PDF_DEVANAGARI_FONT_PATH and install uharfbuzz.
+        # Final non-failing fallback. With assets/fonts/FreeSans.ttf committed,
+        # production should not normally reach this branch for Hindi content.
+        if uses_devanagari:
+            logger.warning(
+                "Devanagari text detected but no configured/bundled Unicode font "
+                "was found. Falling back to Helvetica; Hindi glyphs may not render."
+            )
         return "Helvetica", "Helvetica-Bold", False
 
     @staticmethod
@@ -408,6 +454,23 @@ class LessonPdfService:
                 flowables.append(Spacer(1, 1.8 * mm))
                 continue
 
+            # WhatsApp formatter uses a single pair of asterisks for bold
+            # section headings, for example: *📚 Lesson Overview*.
+            whatsapp_heading = self._WHATSAPP_BOLD_LINE_RE.fullmatch(line)
+            if whatsapp_heading:
+                flush_paragraph()
+                heading = self._strip_unsupported_symbols(
+                    whatsapp_heading.group(1).strip()
+                )
+                if heading:
+                    flowables.append(
+                        Paragraph(
+                            self._paragraph_markup(heading),
+                            styles["heading"],
+                        )
+                    )
+                continue
+
             markdown_heading = self._MARKDOWN_HEADING_RE.match(line)
             if markdown_heading:
                 flush_paragraph()
@@ -465,16 +528,39 @@ class LessonPdfService:
 
     @staticmethod
     def _strip_unsupported_symbols(value: str) -> str:
+        """Remove decorative emoji while preserving Hindi and math symbols."""
         result: list[str] = []
+        decorative_symbols = {
+            "⏱",
+            "⭐",
+            "✅",
+        }
+
         for char in value:
+            code = ord(char)
             category = unicodedata.category(char)
-            # Most emoji are Symbol/Other and are not available in the selected
-            # text fonts. Remove them while preserving punctuation and math symbols.
-            if category == "So" and ord(char) > 0x2600:
-                continue
+
+            # Emoji variation selector and zero-width joiner. Once the emoji
+            # components are removed these should not be left behind.
             if char in {"\ufe0f", "\u200d"}:
                 continue
+
+            # Symbols seen in lesson-plan headings that may not be covered by the
+            # selected text font.
+            if char in decorative_symbols:
+                continue
+
+            # Most modern emoji, including 📚 🎯 🧰 👩 🏫 🏠.
+            if 0x1F000 <= code <= 0x1FAFF:
+                continue
+
+            # Miscellaneous decorative/dingbat symbols. This range does not remove
+            # the common mathematical operators we need to preserve: ≠ ≤ ≥ √ ± × ÷.
+            if category == "So" and 0x2600 <= code <= 0x27BF:
+                continue
+
             result.append(char)
+
         return "".join(result).strip()
 
     def _build_filename(self, metadata: LessonPdfMetadata) -> str:
