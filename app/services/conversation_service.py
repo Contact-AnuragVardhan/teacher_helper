@@ -9,7 +9,14 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.language import DEFAULT_LANGUAGE, language_key, normalize_language
 from app.core.logging import get_logger, log_event
-from app.repositories.embedding_content_repository import EmbeddingContentRepository, EmbeddingLessonMatch, EmbeddingPageExtraction, EmbeddingSubsection
+from app.repositories.embedding_content_repository import (
+    EmbeddingContentRepository,
+    EmbeddingLessonMatch,
+    EmbeddingPageExtraction,
+    EmbeddingSubsection,
+    EmbeddingTeacherSchedule,
+    EmbeddingTeacherScheduleDay,
+)
 from app.repositories.feedback_repository import FeedbackRepository
 from app.repositories.lesson_repository import AccessibleLessonSummary, LessonRepository
 from app.repositories.session_repository import SessionRepository
@@ -143,6 +150,15 @@ TEXT: dict[str, dict[str, str]] = {
         "pages_label": "पुस्तक पृष्ठ {pages}",
         "lesson_day_footer": "नीचे एक दिन टैप करें।",
         "lesson_day_invalid": "कृपया सूची से सही दिन चुनें।",
+        "lesson_schedule_header": "सप्ताह चुनें",
+        "lesson_schedule_body": "इस अध्याय के लिए शिक्षक की एक से अधिक साप्ताहिक योजनाएँ मिलीं। सही सप्ताह चुनें।",
+        "lesson_schedule_button": "सप्ताह",
+        "lesson_schedule_section": "शिक्षक योजना",
+        "lesson_schedule_footer": "नीचे सही सप्ताह टैप करें।",
+        "lesson_schedule_invalid": "कृपया सूची से सही सप्ताह चुनें।",
+        "lesson_schedule_intro": "इस अध्याय के लिए शिक्षक की साप्ताहिक योजना उपलब्ध है।",
+        "lesson_schedule_day_body": "{week_label} | अभ्यास {exercise}\nदिन चुनें।",
+        "lesson_schedule_day_footer": "निर्धारित प्रश्न और पुस्तक पृष्ठ के अनुसार दिन चुनें।",
         "profile_grade_prompt": "आपकी डिफ़ॉल्ट ग्रेड/कक्षा क्या है? उदाहरण: 1, 2, 3",
         "profile_subject_prompt": "आप कौन सा विषय पढ़ाते हैं? उदाहरण: गणित",
         "profile_language_prompt": "कृपया पसंदीदा भाषा लिखें। विकल्प: {options}",
@@ -294,6 +310,15 @@ TEXT: dict[str, dict[str, str]] = {
         "pages_label": "Book Pages {pages}",
         "lesson_day_footer": "Tap one day below.",
         "lesson_day_invalid": "Please choose a valid day from the list.",
+        "lesson_schedule_header": "Choose Week",
+        "lesson_schedule_body": "More than one teacher schedule is available for this chapter. Choose the week you want to teach.",
+        "lesson_schedule_button": "Weeks",
+        "lesson_schedule_section": "Teacher Schedule",
+        "lesson_schedule_footer": "Tap the correct week below.",
+        "lesson_schedule_invalid": "Please choose a valid week from the list.",
+        "lesson_schedule_intro": "A teacher weekly schedule is available for this chapter.",
+        "lesson_schedule_day_body": "{week_label} | Exercise {exercise}\nChoose a day.",
+        "lesson_schedule_day_footer": "Choose the day based on the assigned questions and book pages.",
         "profile_grade_prompt": "What is your default grade/class? Example: 1, 2, 3",
         "profile_subject_prompt": "What subject do you teach? Example: English",
         "profile_language_prompt": "Please enter preferred language. Options: {options}",
@@ -445,6 +470,15 @@ TEXT: dict[str, dict[str, str]] = {
         "pages_label": "Book Pages {pages}",
         "lesson_day_footer": "Neeche ek day tap karein.",
         "lesson_day_invalid": "Please list se valid day choose karein.",
+        "lesson_schedule_header": "Choose Week",
+        "lesson_schedule_body": "Is chapter ke liye ek se zyada teacher schedules available hain. Sahi week choose karein.",
+        "lesson_schedule_button": "Weeks",
+        "lesson_schedule_section": "Teacher Schedule",
+        "lesson_schedule_footer": "Neeche correct week tap karein.",
+        "lesson_schedule_invalid": "Please list se valid week choose karein.",
+        "lesson_schedule_intro": "Is chapter ke liye teacher weekly schedule available hai.",
+        "lesson_schedule_day_body": "{week_label} | Exercise {exercise}\nEk day choose karein.",
+        "lesson_schedule_day_footer": "Assigned questions aur book pages ke hisaab se day choose karein.",
         "profile_grade_prompt": "Aapki default grade/class kya hai? Example: 1, 2, 3",
         "profile_subject_prompt": "Aap kaunsa subject padhate hain? Example: English",
         "profile_language_prompt": "Please preferred language likhein. Options: {options}",
@@ -547,6 +581,7 @@ class ConversationService:
             ConversationState.PROFILE_LANGUAGE: self._handle_profile_language,
             ConversationState.NEW_LESSON_TOPIC: self._handle_new_lesson_topic,
             ConversationState.NEW_LESSON_GRADE: self._handle_new_lesson_grade,
+            ConversationState.NEW_LESSON_SCHEDULE: self._handle_new_lesson_schedule,
             ConversationState.NEW_LESSON_DAY: self._handle_new_lesson_day,
             ConversationState.NEW_LESSON_SUBJECT: self._handle_new_lesson_subject,
             ConversationState.NEW_LESSON_DURATION: self._handle_new_lesson_duration,
@@ -1185,8 +1220,9 @@ class ConversationService:
                         number=lesson.toc_number,
                     )
                 )
-            if lesson.book_title:
-                description_parts.append(lesson.book_title)
+            # The book has already been selected before the TOC is shown.
+            # Repeating the (often long) book title here can consume WhatsApp's
+            # short list-row description and hide the more useful book-page range.
             if lesson.display_pages != "Not available":
                 description_parts.append(self._text(language, "pages_label", pages=lesson.display_pages))
             rows.append(
@@ -1316,6 +1352,175 @@ class ConversationService:
                 "rows": rows,
             },
         )
+
+    def _lesson_schedule_reply(
+        self,
+        *,
+        lesson: EmbeddingLessonMatch,
+        schedules: list[EmbeddingTeacherSchedule],
+        summary: str,
+        language: str,
+    ) -> ConversationReply:
+        rows: list[dict[str, str]] = []
+        for schedule in schedules[:9]:
+            week_label = self._format_teacher_schedule_date(schedule.week_start_date)
+            exercise = (schedule.exercise or "").strip()
+            title_parts = [week_label]
+            if exercise:
+                title_parts.append(f"Ex {exercise}")
+            title = " · ".join(part for part in title_parts if part) or "Teacher Schedule"
+            description = f"{max(schedule.day_count, 0)} days"
+            rows.append(
+                {
+                    "id": f"lesson_schedule:{schedule.id}",
+                    "title": title[:24],
+                    "description": description[:72],
+                }
+            )
+        rows.append(self._main_menu_row(language))
+
+        reply_parts = [
+            self._text(language, "lesson_schedule_intro"),
+            f"{self._toc_item_label(lesson, language)}: {lesson.title}",
+            self._text(language, "pages_label", pages=lesson.display_pages),
+        ]
+        if summary:
+            reply_parts.extend(["", summary])
+        reply_parts.extend(["", self._text(language, "lesson_schedule_body")])
+        reply_text = "\n".join(reply_parts)
+        return self._reply(
+            reply_text,
+            ConversationState.NEW_LESSON_SCHEDULE,
+            outbound={
+                "type": "list",
+                "header": self._text(language, "lesson_schedule_header"),
+                "body": self._text(language, "lesson_schedule_body"),
+                "button_text": self._text(language, "lesson_schedule_button"),
+                "section_title": self._text(language, "lesson_schedule_section"),
+                "footer": self._text(language, "lesson_schedule_footer"),
+                "rows": rows,
+            },
+        )
+
+    def _teacher_schedule_day_reply(
+        self,
+        *,
+        lesson: EmbeddingLessonMatch,
+        schedule: EmbeddingTeacherSchedule,
+        days: list[EmbeddingTeacherScheduleDay],
+        summary: str,
+        language: str,
+    ) -> ConversationReply:
+        rows: list[dict[str, str]] = []
+        for index, day in enumerate(days[:9], start=1):
+            weekday = (day.weekday or f"Day {day.day or index}").strip()
+            questions = day.questions_display
+            pages = day.display_pages
+            description_parts: list[str] = []
+            if questions:
+                description_parts.append(questions)
+            if pages != "Not available":
+                description_parts.append(self._text(language, "pages_label", pages=pages))
+            if not description_parts and day.activity:
+                description_parts.append(day.activity)
+            rows.append(
+                {
+                    "id": f"teacher_day:{day.id}",
+                    "title": weekday[:24],
+                    "description": " | ".join(description_parts)[:72],
+                }
+            )
+        rows.append(self._main_menu_row(language))
+
+        week_label = self._format_teacher_schedule_date(schedule.week_start_date)
+        exercise = (schedule.exercise or "-").strip() or "-"
+        body = self._text(
+            language,
+            "lesson_schedule_day_body",
+            week_label=week_label,
+            exercise=exercise,
+        )
+        reply_text = (
+            f"{self._text(language, 'lesson_schedule_intro')}\n"
+            f"{self._toc_item_label(lesson, language)}: {lesson.title}\n"
+            f"{body}"
+        )
+        if summary:
+            reply_text += f"\n\n{summary}"
+        return self._reply(
+            reply_text,
+            ConversationState.NEW_LESSON_DAY,
+            outbound={
+                "type": "list",
+                "header": self._text(language, "lesson_day_header"),
+                "body": body,
+                "button_text": self._text(language, "lesson_day_button"),
+                "section_title": self._text(language, "lesson_day_section"),
+                "footer": self._text(language, "lesson_schedule_day_footer"),
+                "rows": rows,
+            },
+        )
+
+    def _resolve_teacher_schedule_choice(
+        self,
+        *,
+        choice: str,
+        text: str,
+        schedules: list[EmbeddingTeacherSchedule],
+    ) -> EmbeddingTeacherSchedule | None:
+        selected_id = ""
+        if choice.startswith("lesson_schedule:"):
+            selected_id = choice.split(":", 1)[1].strip()
+        if selected_id:
+            return next((item for item in schedules if item.id == selected_id), None) or self.embedding_content_repo.get_teacher_schedule_by_id(selected_id)
+
+        raw = (text or choice or "").strip()
+        if raw.isdigit():
+            index = int(raw)
+            if 1 <= index <= len(schedules):
+                return schedules[index - 1]
+        return None
+
+    def _resolve_teacher_schedule_day_choice(
+        self,
+        *,
+        choice: str,
+        text: str,
+        days: list[EmbeddingTeacherScheduleDay],
+    ) -> tuple[int, EmbeddingTeacherScheduleDay] | None:
+        selected_id = ""
+        if choice.startswith("teacher_day:"):
+            selected_id = choice.split(":", 1)[1].strip()
+        if selected_id:
+            for index, item in enumerate(days, start=1):
+                if item.id == selected_id:
+                    return index, item
+            day = self.embedding_content_repo.get_teacher_schedule_day_by_id(selected_id)
+            if day:
+                return int(day.day or 1), day
+
+        raw = (text or choice or "").strip()
+        if raw.isdigit():
+            index = int(raw)
+            if 1 <= index <= len(days):
+                return index, days[index - 1]
+
+        normalized = normalize_choice(raw)
+        for index, item in enumerate(days, start=1):
+            if item.weekday and normalized == normalize_choice(item.weekday):
+                return index, item
+        return None
+
+    @staticmethod
+    def _format_teacher_schedule_date(value: str | None) -> str:
+        raw = (value or "").strip()
+        if not raw:
+            return "Week"
+        try:
+            parsed = datetime.strptime(raw[:10], "%Y-%m-%d")
+            return parsed.strftime("%b %d, %Y")
+        except ValueError:
+            return raw
 
     def _resolve_subsection_choice(
         self,
@@ -2153,6 +2358,8 @@ class ConversationService:
 
         self._store_selected_lesson_topic(session, lesson_match)
         session.temp_content_subsection_id = None
+        session.temp_teacher_schedule_id = None
+        session.temp_teacher_schedule_day_id = None
         session.temp_duration_minutes = None
         session.current_state = ConversationState.NEW_LESSON_DURATION.value
         self.session_repo.save(session)
@@ -2169,6 +2376,84 @@ class ConversationService:
         )
         return self._reply(self._text(language, "duration_prompt"), ConversationState.NEW_LESSON_DURATION)
 
+    def _handle_new_lesson_schedule(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+        language = self._teacher_language(teacher, whatsapp_number)
+        choice = normalize_choice(text)
+
+        if not teacher:
+            session.current_state = ConversationState.PROFILE_NAME.value
+            self.session_repo.save(session)
+            return self._reply(self._text(language, "new_lesson_without_profile"), ConversationState.PROFILE_NAME)
+
+        lesson = self.embedding_content_repo.get_lesson_by_chapter_id(session.temp_content_chapter_id or "")
+        if not lesson:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply(self._text(language, "lesson_no_match", topic=session.temp_topic or ""), language)
+
+        schedules = self.embedding_content_repo.list_teacher_schedules_for_lesson(lesson)
+        if not schedules:
+            # Tables/schedules may have disappeared between requests. Fall back
+            # to the original structural day flow rather than breaking the book.
+            session.temp_teacher_schedule_id = None
+            session.temp_teacher_schedule_day_id = None
+            subsections = self.embedding_content_repo.list_subsections_for_lesson(lesson)
+            if not subsections:
+                self.session_repo.reset_for_main_menu(session)
+                return self._main_menu_reply(self._text(language, "lesson_no_match", topic=session.temp_topic or ""), language)
+            session.current_state = ConversationState.NEW_LESSON_DAY.value
+            self.session_repo.save(session)
+            return self._lesson_day_reply(
+                lesson=lesson,
+                subsections=subsections,
+                summary=session.temp_lesson_summary or "",
+                language=language,
+            )
+
+        selected = self._resolve_teacher_schedule_choice(choice=choice, text=text, schedules=schedules)
+        if not selected:
+            reply = self._lesson_schedule_reply(
+                lesson=lesson,
+                schedules=schedules,
+                summary=session.temp_lesson_summary or "",
+                language=language,
+            )
+            return self._reply(
+                f"{self._text(language, 'lesson_schedule_invalid')}\n\n{reply.reply}",
+                ConversationState.NEW_LESSON_SCHEDULE,
+                outbound=reply.outbound,
+            )
+
+        days = self.embedding_content_repo.list_teacher_schedule_days(selected.id)
+        if not days:
+            # Do not strand the user on malformed schedule metadata.
+            session.temp_teacher_schedule_id = None
+            session.temp_teacher_schedule_day_id = None
+            subsections = self.embedding_content_repo.list_subsections_for_lesson(lesson)
+            if not subsections:
+                self.session_repo.reset_for_main_menu(session)
+                return self._main_menu_reply(self._text(language, "lesson_no_match", topic=session.temp_topic or ""), language)
+            session.current_state = ConversationState.NEW_LESSON_DAY.value
+            self.session_repo.save(session)
+            return self._lesson_day_reply(
+                lesson=lesson,
+                subsections=subsections,
+                summary=session.temp_lesson_summary or "",
+                language=language,
+            )
+
+        session.temp_teacher_schedule_id = selected.id
+        session.temp_teacher_schedule_day_id = None
+        session.current_state = ConversationState.NEW_LESSON_DAY.value
+        self.session_repo.save(session)
+        return self._teacher_schedule_day_reply(
+            lesson=lesson,
+            schedule=selected,
+            days=days,
+            summary=session.temp_lesson_summary or "",
+            language=language,
+        )
+
     def _handle_new_lesson_day(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
         language = self._teacher_language(teacher, whatsapp_number)
@@ -2183,6 +2468,108 @@ class ConversationService:
         if not lesson:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "lesson_no_match", topic=session.temp_topic or ""), language)
+
+        # New optional real-teacher schedule flow. It is entered only when the
+        # selected chapter has rows in the additive schedule tables. Every book
+        # without such rows continues into the original subsection flow below.
+        if session.temp_teacher_schedule_id:
+            schedule = self.embedding_content_repo.get_teacher_schedule_by_id(session.temp_teacher_schedule_id)
+            days = self.embedding_content_repo.list_teacher_schedule_days(session.temp_teacher_schedule_id)
+            if schedule and days:
+                selected_schedule_day = self._resolve_teacher_schedule_day_choice(
+                    choice=choice,
+                    text=text,
+                    days=days,
+                )
+                if not selected_schedule_day:
+                    day_reply = self._teacher_schedule_day_reply(
+                        lesson=lesson,
+                        schedule=schedule,
+                        days=days,
+                        summary=session.temp_lesson_summary or "",
+                        language=language,
+                    )
+                    return self._reply(
+                        f"{self._text(language, 'lesson_day_invalid')}\n\n{day_reply.reply}",
+                        ConversationState.NEW_LESSON_DAY,
+                        outbound=day_reply.outbound,
+                    )
+
+                day_number, schedule_day = selected_schedule_day
+                subsection = self.embedding_content_repo.build_subsection_from_teacher_schedule_day(
+                    lesson,
+                    schedule,
+                    schedule_day,
+                )
+                if subsection:
+                    lesson_grade = (session.temp_profile_grade or "").strip() or teacher.default_grade
+                    lesson_subject = (session.temp_profile_subject or "").strip() or teacher.default_subject
+                    requested_duration = session.temp_duration_minutes or 0
+                    result = self.pdf_content_lesson_service.generate_day_lesson_plan(
+                        lesson=lesson,
+                        subsection=subsection,
+                        day_number=int(schedule_day.day or day_number),
+                        teacher=teacher,
+                        grade=lesson_grade,
+                        subject=lesson_subject,
+                        duration_minutes=requested_duration,
+                        preferred_language=language,
+                    )
+                    session.temp_content_subsection_id = subsection.id
+                    session.temp_teacher_schedule_day_id = schedule_day.id
+                    session.temp_lesson_day_number = int(schedule_day.day or day_number)
+                    session.temp_lesson_day_title = (schedule_day.weekday or f"Day {day_number}")[:100]
+                    session.temp_lesson_book_title = lesson.book_title
+                    session.temp_lesson_document_key = lesson.document_key
+                    session.temp_lesson_school_name = lesson.school_name
+                    session.temp_lesson_chapter_title = lesson.chapter_title
+                    session.temp_lesson_section_title = lesson.section_title
+                    session.temp_lesson_subsection_number = subsection.subsection_number
+                    session.temp_lesson_subsection_title = subsection.title
+                    session.temp_lesson_book_pages = subsection.display_pages
+                    session.temp_lesson_pdf_start_page = subsection.pdf_start_page
+                    session.temp_lesson_pdf_end_page = subsection.pdf_end_page
+                    session.temp_lesson_printed_start_page = subsection.printed_start_page
+                    session.temp_lesson_printed_end_page = subsection.printed_end_page
+                    session.temp_customize_from_page = subsection.printed_start_page
+                    session.temp_customize_to_page = subsection.printed_end_page
+                    session.temp_lesson_is_customized = False
+                    session.temp_topic = lesson.title
+                    session.temp_duration_minutes = requested_duration or result.duration_minutes
+                    session.temp_generated_lesson = result.lesson_text
+                    session.current_state = ConversationState.NEW_LESSON_ACTION_MENU.value
+                    self.session_repo.save(session)
+
+                    log_event(
+                        logger,
+                        "lesson_day_generated_from_teacher_schedule",
+                        teacher_id=teacher.id,
+                        chapter_id=lesson.chapter_id,
+                        teacher_schedule_id=schedule.id,
+                        teacher_schedule_day_id=schedule_day.id,
+                        week_start_date=schedule.week_start_date,
+                        exercise=schedule.exercise,
+                        questions=schedule_day.questions,
+                        selected_book_pages=schedule_day.selected_book_pages,
+                        selected_pdf_pages=schedule_day.selected_pdf_pages,
+                        provider_used=result.provider_used,
+                    )
+                    return self._generated_lesson_action_reply(result.lesson_text, language)
+
+                # If exact scheduled page text is unavailable, fail safe to the
+                # original chapter/subsection flow instead of generating from a
+                # partial or guessed source.
+                log_event(
+                    logger,
+                    "teacher_schedule_day_source_unavailable_fallback",
+                    chapter_id=lesson.chapter_id,
+                    teacher_schedule_id=schedule.id,
+                    teacher_schedule_day_id=schedule_day.id,
+                )
+
+            session.temp_teacher_schedule_id = None
+            session.temp_teacher_schedule_day_id = None
+            self.session_repo.save(session)
 
         subsections = self.embedding_content_repo.list_subsections_for_lesson(lesson)
         selected = self._resolve_subsection_choice(choice=choice, text=text, subsections=subsections)
@@ -2315,6 +2702,8 @@ class ConversationService:
         session.temp_content_document_id = None
         session.temp_content_chapter_id = None
         session.temp_content_subsection_id = None
+        session.temp_teacher_schedule_id = None
+        session.temp_teacher_schedule_day_id = None
 
         lessons = self._lesson_topic_list_for_session(session, teacher)
         if not lessons:
@@ -2371,11 +2760,6 @@ class ConversationService:
             self.session_repo.reset_for_main_menu(session)
             return self._main_menu_reply(self._text(language, "lesson_no_match", topic=topic), language)
 
-        subsections = self.embedding_content_repo.list_subsections_for_lesson(lesson_match)
-        if not subsections:
-            self.session_repo.reset_for_main_menu(session)
-            return self._main_menu_reply(self._text(language, "lesson_no_match", topic=topic), language)
-
         summary, provider_used = self.pdf_content_lesson_service.generate_section_summary(
             lesson=lesson_match,
             teacher=teacher,
@@ -2393,6 +2777,62 @@ class ConversationService:
         session.temp_lesson_chapter_title = lesson_match.chapter_title
         session.temp_lesson_section_title = lesson_match.section_title
         session.temp_lesson_summary = summary
+
+        # Optional question-targeted teacher schedules take precedence only for
+        # chapters where such rows exist. Every existing book/chapter without
+        # schedule rows uses the original structural subsection/day behavior.
+        schedules = self.embedding_content_repo.list_teacher_schedules_for_lesson(lesson_match)
+        session.temp_teacher_schedule_id = None
+        session.temp_teacher_schedule_day_id = None
+
+        if schedules:
+            if len(schedules) == 1:
+                schedule = schedules[0]
+                days = self.embedding_content_repo.list_teacher_schedule_days(schedule.id)
+                if days:
+                    session.temp_teacher_schedule_id = schedule.id
+                    session.current_state = ConversationState.NEW_LESSON_DAY.value
+                    self.session_repo.save(session)
+                    log_event(
+                        logger,
+                        "lesson_teacher_schedule_selected_automatically",
+                        teacher_id=teacher.id,
+                        chapter_id=lesson_match.chapter_id,
+                        teacher_schedule_id=schedule.id,
+                        week_start_date=schedule.week_start_date,
+                        exercise=schedule.exercise,
+                        day_count=len(days),
+                    )
+                    return self._teacher_schedule_day_reply(
+                        lesson=lesson_match,
+                        schedule=schedule,
+                        days=days,
+                        summary=summary,
+                        language=language,
+                    )
+
+            else:
+                session.current_state = ConversationState.NEW_LESSON_SCHEDULE.value
+                self.session_repo.save(session)
+                log_event(
+                    logger,
+                    "lesson_teacher_schedule_choice_required",
+                    teacher_id=teacher.id,
+                    chapter_id=lesson_match.chapter_id,
+                    schedule_count=len(schedules),
+                )
+                return self._lesson_schedule_reply(
+                    lesson=lesson_match,
+                    schedules=schedules,
+                    summary=summary,
+                    language=language,
+                )
+
+        subsections = self.embedding_content_repo.list_subsections_for_lesson(lesson_match)
+        if not subsections:
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply(self._text(language, "lesson_no_match", topic=topic), language)
+
         session.current_state = ConversationState.NEW_LESSON_DAY.value
         self.session_repo.save(session)
 
@@ -2732,6 +3172,16 @@ class ConversationService:
             for page in selected_pages
             if (page.printed_page_number or "").strip().isdigit()
         ]
+        schedule = (
+            self.embedding_content_repo.get_teacher_schedule_by_id(session.temp_teacher_schedule_id or "")
+            if session.temp_teacher_schedule_id
+            else None
+        )
+        schedule_day = (
+            self.embedding_content_repo.get_teacher_schedule_day_by_id(session.temp_teacher_schedule_day_id or "")
+            if session.temp_teacher_schedule_day_id
+            else None
+        )
         customized_subsection = EmbeddingSubsection(
             id=original_subsection.id,
             document_id=lesson.document_id,
@@ -2750,6 +3200,12 @@ class ConversationService:
             include_in_embeddings=True,
             embedding_readiness="ready",
             quality_flags=list(original_subsection.quality_flags or []),
+            source_kind=("teacher_schedule_day" if schedule and schedule_day else None),
+            schedule_week_start_date=(schedule.week_start_date if schedule else None),
+            schedule_exercise=((schedule.exercise or schedule_day.exercise) if schedule and schedule_day else None),
+            schedule_questions=(list(schedule_day.questions or []) if schedule_day else None),
+            schedule_topic=(schedule_day.topic if schedule_day else None),
+            schedule_activity=(schedule_day.activity if schedule_day else None),
         )
 
         lesson_grade = (session.temp_profile_grade or "").strip() or teacher.default_grade

@@ -451,6 +451,9 @@ def test_poem_toc_item_is_labeled_lesson_not_chapter(db_session):
     row = next(row for row in topic_reply.outbound["rows"] if row["id"].startswith("lesson_topic:"))
     assert "Lesson 4" in row["description"]
     assert "Chapter 4" not in row["description"]
+    assert "Book Pages 1-5" in row["description"]
+    if lesson.book_title:
+        assert lesson.book_title not in row["description"]
 
     session = db_session.query(SessionState).filter(SessionState.whatsapp_number == PHONE).one()
     session.temp_content_chapter_id = CHAPTER_ID

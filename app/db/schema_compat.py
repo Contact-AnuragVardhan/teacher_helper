@@ -18,6 +18,8 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
         "temp_content_document_id": "VARCHAR(80)",
         "temp_content_chapter_id": "VARCHAR(80)",
         "temp_content_subsection_id": "VARCHAR(80)",
+        "temp_teacher_schedule_id": "VARCHAR(80)",
+        "temp_teacher_schedule_day_id": "VARCHAR(80)",
         "temp_lesson_day_number": "INTEGER",
         "temp_lesson_day_title": "VARCHAR(100)",
         "temp_lesson_book_title": "VARCHAR(255)",

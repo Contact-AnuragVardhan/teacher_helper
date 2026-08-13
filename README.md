@@ -259,3 +259,29 @@ The generated file is kept in memory only; the application does not need a persi
 
 For Hindi PDFs, install the dependencies from `requirements.txt` and ensure a Devanagari font is available. The application checks common Noto Sans Devanagari locations and also supports explicit font paths through the `LESSON_PDF_*` environment variables. Font files are not included in this project archive.
 
+
+## Optional teacher weekly schedules
+
+Teacher Helper can now read the additive `embeddings_teacher_schedules` and
+`embeddings_teacher_schedule_days` tables created by the JSON-to-DB project.
+This does **not** replace `embeddings_book_subsections`.
+
+Behavior is intentionally backward compatible:
+
+- If the selected TOC item has no teacher schedule rows, the existing structural
+  `Day 1 / Day 2 / ...` subsection flow is used unchanged.
+- If exactly one teacher schedule exists, Teacher Helper goes directly to its
+  Monday-Friday day list.
+- If multiple schedules exist for the same chapter, the teacher first chooses
+  the week/exercise and then chooses the day.
+- Scheduled days retrieve the exact `selected_pdf_pages` / `selected_book_pages`
+  from `embeddings_page_extractions`. Non-contiguous source selections are kept
+  exact; missing intermediate pages are not silently added.
+- Exercise, assigned question IDs, schedule topic/activity, week, and exact book
+  pages are passed to lesson generation as mandatory schedule context.
+- Page customization remains the existing teacher-entered contiguous From/To
+  Book Page flow. When customization starts from a scheduled lesson, its
+  exercise/question target is preserved while the teacher-selected page range
+  becomes the source text.
+- If the new schedule tables are not installed yet or a chapter has no schedule,
+  Teacher Helper falls back safely to the original subsection flow.

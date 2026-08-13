@@ -72,6 +72,8 @@ class SessionRepository:
         session.temp_content_document_id = None
         session.temp_content_chapter_id = None
         session.temp_content_subsection_id = None
+        session.temp_teacher_schedule_id = None
+        session.temp_teacher_schedule_day_id = None
         session.temp_lesson_day_number = None
         session.temp_lesson_day_title = None
         session.temp_lesson_book_title = None
@@ -118,6 +120,8 @@ class SessionRepository:
         session.temp_content_document_id = None
         session.temp_content_chapter_id = None
         session.temp_content_subsection_id = None
+        session.temp_teacher_schedule_id = None
+        session.temp_teacher_schedule_day_id = None
         session.temp_lesson_day_number = None
         session.temp_lesson_day_title = None
         session.temp_lesson_book_title = None

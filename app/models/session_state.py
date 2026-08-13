@@ -24,6 +24,8 @@ class SessionState(Base):
     temp_content_document_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     temp_content_chapter_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     temp_content_subsection_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    temp_teacher_schedule_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    temp_teacher_schedule_day_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     temp_lesson_day_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     temp_lesson_day_title: Mapped[str | None] = mapped_column(String(100), nullable=True)
     temp_lesson_book_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
