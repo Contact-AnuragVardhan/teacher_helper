@@ -100,3 +100,10 @@ def test_teacher_schedule_day_reply_contains_plain_text_days_and_interactive_row
     assert reply.outbound is not None
     assert reply.outbound["type"] == "list"
     assert len(reply.outbound["rows"]) == 6  # five scheduled days + Main Menu
+
+
+def test_schedule_footer_stays_within_whatsapp_list_limit():
+    service = ConversationService.__new__(ConversationService)
+    assert len(service._text("Hinglish", "lesson_schedule_day_footer")) <= 60
+    assert len(service._text("English", "lesson_schedule_day_footer")) <= 60
+    assert len(service._text("Hindi", "lesson_schedule_day_footer")) <= 60
