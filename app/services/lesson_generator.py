@@ -904,16 +904,21 @@ class LessonGeneratorService:
         lines = ["Source:", "NCERT"]
 
         book = row.get("book")
-        unit_name = row.get("unit_name") or row.get("chapter")
-        topic_name = row.get("topic_name") or row.get("topic") or row.get("chapter")
+        chapter_name = row.get("chapter")
+        unit_name = row.get("unit_name")
+        topic_name = row.get("topic_name") or row.get("topic")
         book_url = row.get("book_url") or row.get("source_reference")
 
         if book:
             lines.append(f"Book: {book}")
         if unit_name:
             lines.append(f"Unit: {unit_name}")
-        if topic_name:
-            lines.append(f"Chapter: {topic_name}")
+        # Only use the Chapter label when the retrieved source explicitly has a
+        # chapter field. Never promote a generic topic_name to Chapter.
+        if chapter_name:
+            lines.append(f"Chapter: {chapter_name}")
+        if topic_name and topic_name != chapter_name:
+            lines.append(f"Topic: {topic_name}")
         """
         if book_url and isinstance(book_url, str) and book_url.startswith(("http://", "https://")):
             lines.append(f"PDF: {book_url}")

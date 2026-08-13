@@ -1,4 +1,5 @@
 import re
+from dataclasses import replace
 
 from app.core.config import Settings
 from app.models.teacher_profile import TeacherProfile
@@ -171,7 +172,7 @@ def test_hindi_summary_fallback_is_profile_language_aware():
     )
 
     assert provider == "deterministic"
-    assert summary.startswith("- यह सारांश उपलब्ध अध्याय सामग्री पर आधारित है।")
+    assert summary.startswith("- यह सारांश चुनी हुई पुस्तक सामग्री पर आधारित है।")
     assert "- पुस्तक पृष्ठ: 1-11" in summary
     assert "Chapter Summary" not in summary
 
@@ -189,3 +190,41 @@ def test_print_pdf_has_profile_language_labels():
     assert labels["teacher"] == "शिक्षक"
     assert labels["book_pages"] == "पुस्तक पृष्ठ"
     assert labels["page"] == "पृष्ठ"
+
+
+def test_poem_structure_type_uses_lesson_label_in_generated_prompt_and_output():
+    service = _service()
+    poem = replace(
+        _lesson(),
+        chapter_number="4",
+        chapter_title="Amanda",
+        section_number="4",
+        section_title="Amanda",
+        structure_type="poem",
+    )
+
+    prompt = service._day_lesson_prompt(
+        lesson=poem,
+        subsection=_subsection(),
+        day_number=1,
+        teacher=_teacher("English"),
+        grade="10",
+        subject="English",
+        duration_minutes=40,
+        preferred_language="English",
+    )
+    assert "Lesson: Amanda" in prompt.user_prompt
+    assert "Chapter: Amanda" not in prompt.user_prompt
+
+    result = service.generate_day_lesson_plan(
+        lesson=poem,
+        subsection=_subsection(),
+        day_number=1,
+        teacher=_teacher("English"),
+        grade="10",
+        subject="English",
+        duration_minutes=40,
+        preferred_language="English",
+    )
+    assert "Lesson: Amanda" in result.lesson_text
+    assert "Chapter: Amanda" not in result.lesson_text
