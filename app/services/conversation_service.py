@@ -1412,6 +1412,7 @@ class ConversationService:
         language: str,
     ) -> ConversationReply:
         rows: list[dict[str, str]] = []
+        plain_day_lines: list[str] = []
         for index, day in enumerate(days[:9], start=1):
             weekday = (day.weekday or f"Day {day.day or index}").strip()
             questions = day.questions_display
@@ -1423,13 +1424,29 @@ class ConversationService:
                 description_parts.append(self._text(language, "pages_label", pages=pages))
             if not description_parts and day.activity:
                 description_parts.append(day.activity)
+
+            description = " | ".join(description_parts)
             rows.append(
                 {
                     "id": f"teacher_day:{day.id}",
                     "title": weekday[:24],
-                    "description": " | ".join(description_parts)[:72],
+                    "description": description[:72],
                 }
             )
+
+            # Keep a plain-text copy of the day menu in the message itself.
+            # WhatsApp still receives the interactive list below, while browser/
+            # local tester clients (or any channel that cannot render the list)
+            # can still see and choose the scheduled days.
+            line_parts = [f"{index}. {weekday}"]
+            if questions:
+                line_parts.append(f"Questions: {questions}")
+            if pages != "Not available":
+                line_parts.append(self._text(language, "pages_label", pages=pages))
+            if len(line_parts) == 1 and day.activity:
+                line_parts.append(day.activity)
+            plain_day_lines.append(" — ".join(line_parts))
+
         rows.append(self._main_menu_row(language))
 
         week_label = self._format_teacher_schedule_date(schedule.week_start_date)
@@ -1440,13 +1457,16 @@ class ConversationService:
             week_label=week_label,
             exercise=exercise,
         )
-        reply_text = (
-            f"{self._text(language, 'lesson_schedule_intro')}\n"
-            f"{self._toc_item_label(lesson, language)}: {lesson.title}\n"
-            f"{body}"
-        )
+        reply_parts = [
+            self._text(language, "lesson_schedule_intro"),
+            f"{self._toc_item_label(lesson, language)}: {lesson.title}",
+            body,
+        ]
+        if plain_day_lines:
+            reply_parts.extend(["", *plain_day_lines])
         if summary:
-            reply_text += f"\n\n{summary}"
+            reply_parts.extend(["", summary])
+        reply_text = "\n".join(reply_parts)
         return self._reply(
             reply_text,
             ConversationState.NEW_LESSON_DAY,
@@ -2415,7 +2435,7 @@ class ConversationService:
             reply = self._lesson_schedule_reply(
                 lesson=lesson,
                 schedules=schedules,
-                summary=session.temp_lesson_summary or "",
+                summary="",
                 language=language,
             )
             return self._reply(
@@ -2450,7 +2470,7 @@ class ConversationService:
             lesson=lesson,
             schedule=selected,
             days=days,
-            summary=session.temp_lesson_summary or "",
+            summary="",
             language=language,
         )
 
@@ -2486,7 +2506,7 @@ class ConversationService:
                         lesson=lesson,
                         schedule=schedule,
                         days=days,
-                        summary=session.temp_lesson_summary or "",
+                        summary="",
                         language=language,
                     )
                     return self._reply(
