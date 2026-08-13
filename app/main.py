@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
     ensure_runtime_columns(engine)
     log_event(logger, "database_ready")
     yield
-    log_event(logger, "app_shutdown") 
+    log_event(logger, "app_shutdown")
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
