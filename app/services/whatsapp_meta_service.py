@@ -292,34 +292,51 @@ class WhatsAppMetaService:
         footer_text: str | None = None,
         section_title: str = "Options",
     ) -> dict[str, Any]:
+        # Meta WhatsApp interactive-list fields have strict length limits.
+        # Enforce them centrally so a slightly long translated label/footer
+        # cannot make Graph API reject the list after the plain-text reply was
+        # already sent (which can also cause webhook retries/duplicate replies).
+        safe_header = (header_text or "")[:60]
+        safe_body = (body or "")[:1024]
+        safe_button = (button_text or "Options")[:20]
+        safe_section = (section_title or "Options")[:24]
+        safe_footer = (footer_text or "")[:60]
+
         interactive_rows = []
-        for row in rows:
+        for row in rows[:10]:
+            row_id = str(row.get("id") or "")[:200]
+            row_title = str(row.get("title") or "")[:24]
+            if not row_id or not row_title:
+                continue
             item = {
-                "id": row["id"],
-                "title": row["title"],
+                "id": row_id,
+                "title": row_title,
             }
-            description = row.get("description")
+            description = str(row.get("description") or "")[:72]
             if description:
                 item["description"] = description
             interactive_rows.append(item)
 
+        if not interactive_rows:
+            raise ValueError("WhatsApp list message requires at least one valid row.")
+
         interactive: dict[str, Any] = {
             "type": "list",
-            "header": {"type": "text", "text": header_text},
-            "body": {"text": body},
+            "header": {"type": "text", "text": safe_header},
+            "body": {"text": safe_body},
             "action": {
-                "button": button_text,
+                "button": safe_button,
                 "sections": [
                     {
-                        "title": section_title,
+                        "title": safe_section,
                         "rows": interactive_rows,
                     }
                 ],
             },
         }
 
-        if footer_text:
-            interactive["footer"] = {"text": footer_text}
+        if safe_footer:
+            interactive["footer"] = {"text": safe_footer}
 
         payload = {
             "messaging_product": "whatsapp",
