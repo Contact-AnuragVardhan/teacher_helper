@@ -524,6 +524,27 @@ class PdfContentLessonService:
         day_content = subsection.text.strip()
         language_instruction = generation_language_instruction(active_language, preserve_source_text=True)
         source_instruction = self._source_preservation_instruction(active_language)
+        schedule_lines: list[str] = []
+        if (subsection.source_kind or "").strip() == "teacher_schedule_day":
+            if subsection.schedule_week_start_date:
+                schedule_lines.append(f"Teacher Schedule Week: {subsection.schedule_week_start_date}")
+            if subsection.schedule_exercise:
+                schedule_lines.append(f"Assigned Exercise: {subsection.schedule_exercise}")
+            if subsection.schedule_questions:
+                schedule_lines.append(f"Assigned Questions: {', '.join(subsection.schedule_questions)}")
+            if subsection.schedule_topic:
+                schedule_lines.append(f"Target Topic: {subsection.schedule_topic}")
+            if subsection.schedule_activity:
+                schedule_lines.append(f"Teacher Activity: {subsection.schedule_activity}")
+        schedule_context = "\n".join(schedule_lines)
+        schedule_instruction = ""
+        if schedule_context:
+            schedule_instruction = (
+                "\nThis DAY comes from a real teacher schedule. The assigned exercise/questions are mandatory targets. "
+                "Use the supplied exact selected book pages to teach the concepts needed for those questions. "
+                "Do not add unassigned exercise questions. The selected pages may be non-contiguous.\n"
+                f"{schedule_context}\n"
+            )
 
         system_prompt = (
             "You are generating a DETAILED LESSON PLAN for ONE DAY only. "
@@ -542,6 +563,7 @@ class PdfContentLessonService:
             "Format Profile: Detailed\n\n"
             f"OUTPUT LANGUAGE RULE: {language_instruction}\n"
             f"SOURCE PRESERVATION RULE: {source_instruction}\n\n"
+            f"{schedule_instruction}"
             "Use ONLY the supplied DAY content.\n"
             "Do NOT use other book content.\n"
             "Do NOT use content from previous days.\n"
@@ -611,6 +633,10 @@ class PdfContentLessonService:
                 "book_pages": book_pages,
                 "duration_minutes": requested_duration,
                 "preferred_language": active_language,
+                "source_kind": subsection.source_kind,
+                "teacher_schedule_week": subsection.schedule_week_start_date,
+                "teacher_schedule_exercise": subsection.schedule_exercise,
+                "teacher_schedule_questions": subsection.schedule_questions or [],
             },
         )
 
@@ -729,8 +755,31 @@ class PdfContentLessonService:
             f"⏱ {labels['total_time']}: ~{requested_duration} {labels['minutes']}\n\n"
         )
         lang = language_key(active_language)
+        schedule_target = ""
+        if (subsection.source_kind or "").strip() == "teacher_schedule_day":
+            exercise = (subsection.schedule_exercise or "").strip()
+            questions = ", ".join(subsection.schedule_questions or [])
+            topic = (subsection.schedule_topic or "").strip()
+            if lang == "hindi":
+                schedule_target = (
+                    f"शिक्षक योजना लक्ष्य: अभ्यास {exercise or '-'}"
+                    f" | प्रश्न {questions or '-'}"
+                    f" | विषय {topic or '-'}\n\n"
+                )
+            elif lang == "hinglish":
+                schedule_target = (
+                    f"Teacher Schedule Target: Exercise {exercise or '-'}"
+                    f" | Questions {questions or '-'}"
+                    f" | Topic {topic or '-'}\n\n"
+                )
+            else:
+                schedule_target = (
+                    f"Teacher Schedule Target: Exercise {exercise or '-'}"
+                    f" | Questions {questions or '-'}"
+                    f" | Topic {topic or '-'}\n\n"
+                )
         if lang == "hindi":
-            return header + (
+            return header + schedule_target + (
                 f"{labels['teacher_quick_view']}\n"
                 f"{labels['grade']}: {grade_value}\n"
                 f"{labels['subject']}: {subject_display}\n"
@@ -765,7 +814,7 @@ class PdfContentLessonService:
                 "आज आपने क्या समझा, उस पर तीन पंक्तियाँ लिखें।"
             )
         if lang == "hinglish":
-            return header + (
+            return header + schedule_target + (
                 f"{labels['teacher_quick_view']}\n"
                 f"Grade: {grade_value}\n"
                 f"Subject: {subject_display}\n"
@@ -799,7 +848,7 @@ class PdfContentLessonService:
                 "Selected book pages revise karein.\n"
                 "Aaj kya samjha us par teen lines likhein."
             )
-        return header + (
+        return header + schedule_target + (
             f"{labels['teacher_quick_view']}\n"
             f"Grade: {grade_value}\n"
             f"Subject: {subject_display}\n"

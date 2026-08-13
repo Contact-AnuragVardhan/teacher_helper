@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import date, datetime
+import json
 import re
 from typing import Any
 
@@ -113,6 +115,13 @@ class EmbeddingSubsection:
     include_in_embeddings: bool | None
     embedding_readiness: str | None
     quality_flags: list[str]
+    display_page_override: str | None = None
+    source_kind: str | None = None
+    schedule_week_start_date: str | None = None
+    schedule_exercise: str | None = None
+    schedule_questions: list[str] | None = None
+    schedule_topic: str | None = None
+    schedule_activity: str | None = None
 
     @property
     def title(self) -> str:
@@ -120,6 +129,8 @@ class EmbeddingSubsection:
 
     @property
     def display_pages(self) -> str:
+        if (self.display_page_override or "").strip():
+            return str(self.display_page_override).strip()
         if self.printed_start_page and self.printed_end_page:
             if str(self.printed_start_page) == str(self.printed_end_page):
                 return str(self.printed_start_page)
@@ -133,6 +144,59 @@ class EmbeddingSubsection:
                 return labels[0]
             return f"{labels[0]}-{labels[-1]}"
         return "Not available"
+
+
+@dataclass(slots=True)
+class EmbeddingTeacherSchedule:
+    id: str
+    document_id: str
+    schedule_key: str | None
+    chapter_number: str | None
+    chapter_title: str | None
+    section_number: str | None
+    section_title: str | None
+    week_start_date: str | None
+    schedule_source: str | None
+    schedule_type: str | None
+    exercise: str | None
+    schedule_note: str | None
+    day_count: int = 0
+
+
+@dataclass(slots=True)
+class EmbeddingTeacherScheduleDay:
+    id: str
+    teacher_schedule_id: str
+    document_id: str
+    day: int | None
+    weekday: str | None
+    day_type: str | None
+    activity: str | None
+    topic: str | None
+    teaching_book_page_ranges: list[dict[str, Any]]
+    exercise_book_pages: list[int]
+    exercise: str | None
+    questions: list[str]
+    range_source: str | None
+    source_input_warning: str | None
+    selected_book_pages: list[int]
+    selected_pdf_pages: list[int]
+    selected_page_count: int | None
+    selection_is_contiguous: bool | None
+    display_book_pages: str | None
+    display_pdf_pages: str | None
+    selection_policy: str | None
+    selected_pages_available: bool | None
+
+    @property
+    def display_pages(self) -> str:
+        if self.selected_book_pages:
+            return EmbeddingContentRepository.format_book_page_sequence(self.selected_book_pages)
+        return (self.display_book_pages or "").strip() or "Not available"
+
+    @property
+    def questions_display(self) -> str:
+        return ", ".join(str(item).strip() for item in self.questions if str(item).strip())
 
 
 @dataclass(slots=True)
@@ -277,6 +341,307 @@ class EmbeddingContentRepository:
     def get_lesson_by_chapter_id(self, chapter_id: str) -> EmbeddingLessonMatch | None:
         rows = self._candidate_lessons(chapter_id=chapter_id)
         return rows[0] if rows else None
+
+    @staticmethod
+    def format_book_page_sequence(values: list[int]) -> str:
+        """Compact an exact page selection without pretending gaps are contiguous."""
+        normalized = sorted({int(value) for value in values if value is not None})
+        if not normalized:
+            return "Not available"
+        parts: list[str] = []
+        start = previous = normalized[0]
+        for value in normalized[1:]:
+            if value == previous + 1:
+                previous = value
+                continue
+            parts.append(str(start) if start == previous else f"{start}-{previous}")
+            start = previous = value
+        parts.append(str(start) if start == previous else f"{start}-{previous}")
+        return ", ".join(parts)
+
+    def list_teacher_schedules_for_lesson(self, lesson: EmbeddingLessonMatch) -> list[EmbeddingTeacherSchedule]:
+        """Return optional real-teacher schedules for a selected TOC item.
+
+        These tables are additive. If they do not exist yet, or no schedule was
+        ingested for this book/chapter, return an empty list so callers can use
+        the existing structural subsection/day flow unchanged.
+        """
+        if not lesson.document_id:
+            return []
+
+        id_select = "CAST(ts.id AS text)" if not self.settings.database_is_sqlite else "CAST(ts.id AS TEXT)"
+        doc_select = "CAST(ts.document_id AS text)" if not self.settings.database_is_sqlite else "CAST(ts.document_id AS TEXT)"
+        document_expr = "CAST(:document_id AS uuid)" if not self.settings.database_is_sqlite else ":document_id"
+        sql = text(
+            f"""
+            SELECT
+                {id_select} AS id,
+                {doc_select} AS document_id,
+                ts.schedule_key,
+                ts.chapter_number,
+                ts.chapter_title,
+                ts.section_number,
+                ts.section_title,
+                ts.week_start_date,
+                ts.schedule_source,
+                ts.schedule_type,
+                ts.exercise,
+                ts.schedule_note,
+                (
+                    SELECT COUNT(*)
+                    FROM {self._schema_prefix}embeddings_teacher_schedule_days td
+                    WHERE td.teacher_schedule_id = ts.id
+                ) AS day_count
+            FROM {self._schema_prefix}embeddings_teacher_schedules ts
+            WHERE ts.document_id = {document_expr}
+            ORDER BY ts.week_start_date, ts.exercise, ts.schedule_key
+            """
+        )
+        try:
+            rows = self.db.execute(sql, {"document_id": lesson.document_id}).mappings().all()
+        except SQLAlchemyError as exc:
+            # Old databases and books intentionally fall back to structural days.
+            log_event(
+                logger,
+                "embedding_teacher_schedules_lookup_unavailable",
+                error=str(exc),
+                document_id=lesson.document_id,
+                chapter_id=lesson.chapter_id,
+            )
+            self.db.rollback()
+            return []
+
+        schedules = [self._teacher_schedule_from_row(row) for row in rows]
+        matched = [item for item in schedules if self._teacher_schedule_matches_lesson(item, lesson)]
+        log_event(
+            logger,
+            "embedding_teacher_schedules_lookup",
+            document_id=lesson.document_id,
+            chapter_id=lesson.chapter_id,
+            count=len(matched),
+        )
+        return matched
+
+    def get_teacher_schedule_by_id(self, schedule_id: str) -> EmbeddingTeacherSchedule | None:
+        if not schedule_id:
+            return None
+        id_select = "CAST(ts.id AS text)" if not self.settings.database_is_sqlite else "CAST(ts.id AS TEXT)"
+        doc_select = "CAST(ts.document_id AS text)" if not self.settings.database_is_sqlite else "CAST(ts.document_id AS TEXT)"
+        id_expr = "CAST(:schedule_id AS uuid)" if not self.settings.database_is_sqlite else ":schedule_id"
+        sql = text(
+            f"""
+            SELECT
+                {id_select} AS id,
+                {doc_select} AS document_id,
+                ts.schedule_key,
+                ts.chapter_number,
+                ts.chapter_title,
+                ts.section_number,
+                ts.section_title,
+                ts.week_start_date,
+                ts.schedule_source,
+                ts.schedule_type,
+                ts.exercise,
+                ts.schedule_note,
+                (
+                    SELECT COUNT(*)
+                    FROM {self._schema_prefix}embeddings_teacher_schedule_days td
+                    WHERE td.teacher_schedule_id = ts.id
+                ) AS day_count
+            FROM {self._schema_prefix}embeddings_teacher_schedules ts
+            WHERE ts.id = {id_expr}
+            LIMIT 1
+            """
+        )
+        try:
+            row = self.db.execute(sql, {"schedule_id": schedule_id}).mappings().first()
+        except SQLAlchemyError as exc:
+            log_event(logger, "embedding_teacher_schedule_lookup_failed", error=str(exc), schedule_id=schedule_id)
+            self.db.rollback()
+            return None
+        return self._teacher_schedule_from_row(row) if row else None
+
+    def list_teacher_schedule_days(self, schedule_id: str) -> list[EmbeddingTeacherScheduleDay]:
+        if not schedule_id:
+            return []
+        id_select = "CAST(td.id AS text)" if not self.settings.database_is_sqlite else "CAST(td.id AS TEXT)"
+        schedule_select = "CAST(td.teacher_schedule_id AS text)" if not self.settings.database_is_sqlite else "CAST(td.teacher_schedule_id AS TEXT)"
+        doc_select = "CAST(td.document_id AS text)" if not self.settings.database_is_sqlite else "CAST(td.document_id AS TEXT)"
+        schedule_expr = "CAST(:schedule_id AS uuid)" if not self.settings.database_is_sqlite else ":schedule_id"
+        sql = text(
+            f"""
+            SELECT
+                {id_select} AS id,
+                {schedule_select} AS teacher_schedule_id,
+                {doc_select} AS document_id,
+                td.day,
+                td.weekday,
+                td.day_type,
+                td.activity,
+                td.topic,
+                td.teaching_book_page_ranges,
+                td.exercise_book_pages,
+                td.exercise,
+                td.questions,
+                td.range_source,
+                td.source_input_warning,
+                td.selected_book_pages,
+                td.selected_pdf_pages,
+                td.selected_page_count,
+                td.selection_is_contiguous,
+                td.display_book_pages,
+                td.display_pdf_pages,
+                td.selection_policy,
+                td.selected_pages_available
+            FROM {self._schema_prefix}embeddings_teacher_schedule_days td
+            WHERE td.teacher_schedule_id = {schedule_expr}
+            ORDER BY COALESCE(td.day, 2147483647), td.weekday
+            """
+        )
+        try:
+            rows = self.db.execute(sql, {"schedule_id": schedule_id}).mappings().all()
+        except SQLAlchemyError as exc:
+            log_event(logger, "embedding_teacher_schedule_days_lookup_failed", error=str(exc), schedule_id=schedule_id)
+            self.db.rollback()
+            return []
+        return [self._teacher_schedule_day_from_row(row) for row in rows]
+
+    def get_teacher_schedule_day_by_id(self, day_id: str) -> EmbeddingTeacherScheduleDay | None:
+        if not day_id:
+            return None
+        id_select = "CAST(td.id AS text)" if not self.settings.database_is_sqlite else "CAST(td.id AS TEXT)"
+        schedule_select = "CAST(td.teacher_schedule_id AS text)" if not self.settings.database_is_sqlite else "CAST(td.teacher_schedule_id AS TEXT)"
+        doc_select = "CAST(td.document_id AS text)" if not self.settings.database_is_sqlite else "CAST(td.document_id AS TEXT)"
+        id_expr = "CAST(:day_id AS uuid)" if not self.settings.database_is_sqlite else ":day_id"
+        sql = text(
+            f"""
+            SELECT
+                {id_select} AS id,
+                {schedule_select} AS teacher_schedule_id,
+                {doc_select} AS document_id,
+                td.day,
+                td.weekday,
+                td.day_type,
+                td.activity,
+                td.topic,
+                td.teaching_book_page_ranges,
+                td.exercise_book_pages,
+                td.exercise,
+                td.questions,
+                td.range_source,
+                td.source_input_warning,
+                td.selected_book_pages,
+                td.selected_pdf_pages,
+                td.selected_page_count,
+                td.selection_is_contiguous,
+                td.display_book_pages,
+                td.display_pdf_pages,
+                td.selection_policy,
+                td.selected_pages_available
+            FROM {self._schema_prefix}embeddings_teacher_schedule_days td
+            WHERE td.id = {id_expr}
+            LIMIT 1
+            """
+        )
+        try:
+            row = self.db.execute(sql, {"day_id": day_id}).mappings().first()
+        except SQLAlchemyError as exc:
+            log_event(logger, "embedding_teacher_schedule_day_lookup_failed", error=str(exc), day_id=day_id)
+            self.db.rollback()
+            return None
+        return self._teacher_schedule_day_from_row(row) if row else None
+
+    def build_subsection_from_teacher_schedule_day(
+        self,
+        lesson: EmbeddingLessonMatch,
+        schedule: EmbeddingTeacherSchedule,
+        schedule_day: EmbeddingTeacherScheduleDay,
+    ) -> EmbeddingSubsection | None:
+        """Create a lesson-generation source from the schedule's exact page union."""
+        pages = self.list_pages_for_lesson(lesson)
+        if not pages:
+            return None
+
+        selected_pdf_pages = {int(value) for value in schedule_day.selected_pdf_pages if value is not None}
+        selected_book_pages = {int(value) for value in schedule_day.selected_book_pages if value is not None}
+
+        selected: list[EmbeddingPageExtraction] = []
+        for page in pages:
+            if selected_pdf_pages and page.pdf_page_number in selected_pdf_pages:
+                selected.append(page)
+                continue
+            if not selected_pdf_pages and selected_book_pages:
+                label = (page.book_page_label or "").strip()
+                if label.isdigit() and int(label) in selected_book_pages:
+                    selected.append(page)
+
+        # Defensive fallback for older schedule rows that stored only teaching
+        # ranges/exercise pages and not the precomputed exact union.
+        if not selected and not selected_pdf_pages:
+            derived_book_pages: set[int] = set(selected_book_pages)
+            for item in schedule_day.teaching_book_page_ranges:
+                if not isinstance(item, dict):
+                    continue
+                start = self._coerce_int(item.get("start_book_page"))
+                end = self._coerce_int(item.get("end_book_page"))
+                if start is not None and end is not None and start <= end:
+                    derived_book_pages.update(range(start, end + 1))
+            derived_book_pages.update(schedule_day.exercise_book_pages)
+            for page in pages:
+                label = (page.book_page_label or "").strip()
+                if label.isdigit() and int(label) in derived_book_pages:
+                    selected.append(page)
+
+        selected.sort(key=lambda item: item.pdf_page_number)
+        if not selected:
+            return None
+
+        text_parts = [
+            f"Book Page {page.display_page}\n{page.text.strip()}"
+            for page in selected
+            if page.text and page.text.strip()
+        ]
+        if not text_parts:
+            return None
+
+        exact_book_pages = [
+            int(page.book_page_label)
+            for page in selected
+            if (page.book_page_label or "").strip().isdigit()
+        ]
+        display_pages = self.format_book_page_sequence(exact_book_pages or schedule_day.selected_book_pages)
+        start_label = str(min(exact_book_pages)) if exact_book_pages else None
+        end_label = str(max(exact_book_pages)) if exact_book_pages else None
+        quality_flags: list[str] = []
+        if schedule_day.source_input_warning:
+            quality_flags.append("teacher_schedule_source_input_warning")
+
+        return EmbeddingSubsection(
+            id=schedule_day.id,
+            document_id=lesson.document_id,
+            subsection_number=(f"{schedule.exercise or schedule_day.exercise or 'schedule'}:{schedule_day.day}"),
+            subsection_title=(schedule_day.activity or schedule_day.weekday or f"Day {schedule_day.day or 1}"),
+            anchor_marker=schedule_day.weekday,
+            pdf_start_page=min(page.pdf_page_number for page in selected),
+            pdf_end_page=max(page.pdf_page_number for page in selected),
+            printed_start_page=start_label,
+            printed_end_page=end_label,
+            page_numbers=[page.pdf_page_number for page in selected],
+            printed_page_numbers=exact_book_pages,
+            includes=[value for value in (schedule_day.topic, schedule_day.activity) if value],
+            text="\n\n".join(text_parts),
+            text_length_chars=sum(len(part) for part in text_parts),
+            include_in_embeddings=True,
+            embedding_readiness="ready",
+            quality_flags=quality_flags,
+            display_page_override=display_pages,
+            source_kind="teacher_schedule_day",
+            schedule_week_start_date=schedule.week_start_date,
+            schedule_exercise=schedule.exercise or schedule_day.exercise,
+            schedule_questions=list(schedule_day.questions or []),
+            schedule_topic=schedule_day.topic,
+            schedule_activity=schedule_day.activity,
+        )
 
     def list_lessons_for_selection(
         self,
@@ -841,6 +1206,112 @@ class EmbeddingContentRepository:
             quality_flags=self._as_list(row.get("quality_flags")),
         )
 
+    def _teacher_schedule_from_row(self, row) -> EmbeddingTeacherSchedule:
+        return EmbeddingTeacherSchedule(
+            id=str(row.get("id") or ""),
+            document_id=str(row.get("document_id") or ""),
+            schedule_key=row.get("schedule_key"),
+            chapter_number=(str(row.get("chapter_number")).strip() if row.get("chapter_number") is not None else None),
+            chapter_title=row.get("chapter_title"),
+            section_number=(str(row.get("section_number")).strip() if row.get("section_number") is not None else None),
+            section_title=row.get("section_title"),
+            week_start_date=self._date_as_string(row.get("week_start_date")),
+            schedule_source=row.get("schedule_source"),
+            schedule_type=row.get("schedule_type"),
+            exercise=(str(row.get("exercise")).strip() if row.get("exercise") is not None else None),
+            schedule_note=row.get("schedule_note"),
+            day_count=int(row.get("day_count") or 0),
+        )
+
+    def _teacher_schedule_day_from_row(self, row) -> EmbeddingTeacherScheduleDay:
+        return EmbeddingTeacherScheduleDay(
+            id=str(row.get("id") or ""),
+            teacher_schedule_id=str(row.get("teacher_schedule_id") or ""),
+            document_id=str(row.get("document_id") or ""),
+            day=self._coerce_int(row.get("day")),
+            weekday=(str(row.get("weekday")).strip() if row.get("weekday") is not None else None),
+            day_type=(str(row.get("day_type")).strip() if row.get("day_type") is not None else None),
+            activity=(str(row.get("activity")).strip() if row.get("activity") is not None else None),
+            topic=(str(row.get("topic")).strip() if row.get("topic") is not None else None),
+            teaching_book_page_ranges=self._as_json_list(row.get("teaching_book_page_ranges")),
+            exercise_book_pages=self._as_int_list(row.get("exercise_book_pages")),
+            exercise=(str(row.get("exercise")).strip() if row.get("exercise") is not None else None),
+            questions=[str(value).strip() for value in self._as_list(row.get("questions")) if str(value).strip()],
+            range_source=(str(row.get("range_source")).strip() if row.get("range_source") is not None else None),
+            source_input_warning=(str(row.get("source_input_warning")).strip() if row.get("source_input_warning") is not None else None),
+            selected_book_pages=self._as_int_list(row.get("selected_book_pages")),
+            selected_pdf_pages=self._as_int_list(row.get("selected_pdf_pages")),
+            selected_page_count=self._coerce_int(row.get("selected_page_count")),
+            selection_is_contiguous=row.get("selection_is_contiguous"),
+            display_book_pages=(str(row.get("display_book_pages")).strip() if row.get("display_book_pages") is not None else None),
+            display_pdf_pages=(str(row.get("display_pdf_pages")).strip() if row.get("display_pdf_pages") is not None else None),
+            selection_policy=(str(row.get("selection_policy")).strip() if row.get("selection_policy") is not None else None),
+            selected_pages_available=row.get("selected_pages_available"),
+        )
+
+    @staticmethod
+    def _teacher_schedule_matches_lesson(
+        schedule: EmbeddingTeacherSchedule,
+        lesson: EmbeddingLessonMatch,
+    ) -> bool:
+        if schedule.document_id != lesson.document_id:
+            return False
+        if lesson.chapter_number and schedule.chapter_number:
+            return str(schedule.chapter_number).strip().casefold() == str(lesson.chapter_number).strip().casefold()
+        if lesson.section_number and schedule.section_number:
+            return str(schedule.section_number).strip().casefold() == str(lesson.section_number).strip().casefold()
+        if lesson.chapter_title and schedule.chapter_title:
+            return schedule.chapter_title.strip().casefold() == lesson.chapter_title.strip().casefold()
+        if lesson.section_title and schedule.section_title:
+            return schedule.section_title.strip().casefold() == lesson.section_title.strip().casefold()
+        return False
+
+    @staticmethod
+    def _date_as_string(value: Any) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, (date, datetime)):
+            return value.strftime("%Y-%m-%d")
+        text_value = str(value).strip()
+        return text_value[:10] if text_value else None
+
+    @staticmethod
+    def _coerce_int(value: Any) -> int | None:
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _as_int_list(self, value: Any) -> list[int]:
+        result: list[int] = []
+        for item in self._as_list(value):
+            parsed = self._coerce_int(item)
+            if parsed is not None:
+                result.append(parsed)
+        return result
+
+    @staticmethod
+    def _as_json_list(value: Any) -> list[dict[str, Any]]:
+        if value is None:
+            return []
+        if isinstance(value, list):
+            return [item for item in value if isinstance(item, dict)]
+        if isinstance(value, tuple):
+            return [item for item in value if isinstance(item, dict)]
+        if isinstance(value, str):
+            raw = value.strip()
+            if not raw:
+                return []
+            try:
+                parsed = json.loads(raw)
+            except json.JSONDecodeError:
+                return []
+            if isinstance(parsed, list):
+                return [item for item in parsed if isinstance(item, dict)]
+        return []
+
     def _as_list(self, value) -> list:
         if value is None:
             return []
@@ -849,6 +1320,14 @@ class EmbeddingContentRepository:
         if isinstance(value, tuple):
             return list(value)
         if isinstance(value, str):
+            raw = value.strip()
+            if raw.startswith("[") and raw.endswith("]"):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        return parsed
+                except json.JSONDecodeError:
+                    pass
             stripped = value.strip("{}")
             if not stripped:
                 return []
