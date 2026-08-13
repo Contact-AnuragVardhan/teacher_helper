@@ -271,14 +271,14 @@ def test_customize_pages_asks_from_then_to_regenerates_and_preserves_action_menu
 
     customize_reply = service.handle_message(PHONE, "customize_generated_lesson")
     assert customize_reply.current_state == ConversationState.NEW_LESSON_CUSTOMIZE_FROM_PAGE.value
-    assert "Current page range: 2-4" in customize_reply.reply
-    assert "Chapter page range: 1-5" in customize_reply.reply
-    assert "Enter the new From Page" in customize_reply.reply
+    assert "Current book-page range: 2-4" in customize_reply.reply
+    assert "chapter book-page range: 1-5" in customize_reply.reply
+    assert "Enter the new From Book Page" in customize_reply.reply
 
     to_prompt = service.handle_message(PHONE, "1")
     assert to_prompt.current_state == ConversationState.NEW_LESSON_CUSTOMIZE_TO_PAGE.value
-    assert "Selected From Page: 1" in to_prompt.reply
-    assert "Enter the new To Page" in to_prompt.reply
+    assert "Selected From Book Page: 1" in to_prompt.reply
+    assert "Enter the new To Book Page" in to_prompt.reply
 
     generated_reply = service.handle_message(PHONE, "3")
     assert generated_reply.current_state == ConversationState.NEW_LESSON_ACTION_MENU.value
@@ -330,8 +330,8 @@ def test_customize_rejects_page_outside_current_chapter(db_session):
     reply = service.handle_message(PHONE, "99")
 
     assert reply.current_state == ConversationState.NEW_LESSON_CUSTOMIZE_FROM_PAGE.value
-    assert "not inside the current chapter" in reply.reply
-    assert "Enter the new From Page" in reply.reply
+    assert "book page is not inside this chapter" in reply.reply
+    assert "Enter the new From Book Page" in reply.reply
 
 
 def test_customize_rejects_reversed_range_and_back_returns_to_generated_menu(db_session):
@@ -343,8 +343,8 @@ def test_customize_rejects_reversed_range_and_back_returns_to_generated_menu(db_
     invalid = service.handle_message(PHONE, "2")
 
     assert invalid.current_state == ConversationState.NEW_LESSON_CUSTOMIZE_TO_PAGE.value
-    assert "From Page cannot be after To Page" in invalid.reply
-    assert "Enter the new To Page" in invalid.reply
+    assert "From Book Page cannot be after To Book Page" in invalid.reply
+    assert "Enter the new To Book Page" in invalid.reply
 
     back = service.handle_message(PHONE, "back")
     assert back.current_state == ConversationState.NEW_LESSON_ACTION_MENU.value
@@ -389,5 +389,255 @@ def test_customize_rejects_missing_physical_page_gap(db_session):
     reply = service.handle_message(PHONE, "4")
 
     assert reply.current_state == ConversationState.NEW_LESSON_CUSTOMIZE_TO_PAGE.value
-    assert "every selected page must be contiguous" in reply.reply
-    assert "Enter the new To Page" in reply.reply
+    assert "every selected book page must be contiguous" in reply.reply
+    assert "Enter the new To Book Page" in reply.reply
+
+
+def test_page_choice_rejects_physical_pdf_page_input_and_numeric_fallback(db_session):
+    _prepare_generated_lesson_session(db_session)
+    service = ConversationService(db_session)
+    lesson = service.embedding_content_repo.get_lesson_by_chapter_id(CHAPTER_ID)
+    pages = service.embedding_content_repo.list_pages_for_lesson(lesson)
+
+    assert service.embedding_content_repo.resolve_page_choice(pages, "PDF 10") is None
+    assert service.embedding_content_repo.resolve_page_choice(pages, "10") is None
+
+    selected = service.embedding_content_repo.resolve_page_choice(pages, "Book Page 1")
+    assert selected is not None
+    assert selected.pdf_page_number == 10
+    assert selected.display_page == "1"
+
+
+def test_greeting_from_any_active_state_returns_to_main_menu(db_session):
+    _prepare_generated_lesson_session(db_session)
+    service = ConversationService(db_session)
+
+    service.handle_message(PHONE, "customize_generated_lesson")
+    reply = service.handle_message(PHONE, "Hello teacher!")
+
+    assert reply.current_state == ConversationState.MAIN_MENU.value
+    assert reply.outbound["type"] == "list"
+    assert [row["id"] for row in reply.outbound["rows"]] == [
+        "menu_new_lesson",
+        "menu_all_lessons",
+        "menu_my_profile",
+        "menu_feedback",
+    ]
+
+
+def test_poem_toc_item_is_labeled_lesson_not_chapter(db_session):
+    _prepare_generated_lesson_session(db_session)
+    db_session.execute(
+        text(
+            """
+            UPDATE embeddings_book_chapters
+            SET chapter_number = '4',
+                chapter_title = 'Amanda',
+                section_number = '4',
+                section_title = 'Amanda',
+                structure_type = 'poem'
+            WHERE id = :chapter_id
+            """
+        ),
+        {"chapter_id": CHAPTER_ID},
+    )
+    db_session.commit()
+    service = ConversationService(db_session)
+    lesson = service.embedding_content_repo.get_lesson_by_chapter_id(CHAPTER_ID)
+
+    assert lesson.toc_kind == "lesson"
+    assert lesson.title == "Amanda"
+    topic_reply = service._lesson_topic_reply(lessons=[lesson], language="English")
+    row = next(row for row in topic_reply.outbound["rows"] if row["id"].startswith("lesson_topic:"))
+    assert "Lesson 4" in row["description"]
+    assert "Chapter 4" not in row["description"]
+
+    session = db_session.query(SessionState).filter(SessionState.whatsapp_number == PHONE).one()
+    session.temp_content_chapter_id = CHAPTER_ID
+    session.current_state = ConversationState.NEW_LESSON_ACTION_MENU.value
+    db_session.commit()
+    customize_reply = service.handle_message(PHONE, "customize_generated_lesson")
+    assert "lesson book-page range: 1-5" in customize_reply.reply
+    assert "chapter book-page range" not in customize_reply.reply
+
+
+def test_common_greeting_variants_are_global_home_commands(db_session):
+    service = ConversationService(db_session)
+
+    for greeting in (
+        "Hi",
+        "Hii!",
+        "Hello",
+        "Hello teacher",
+        "Namaste",
+        "Namaste ji",
+        "Namaskar sir",
+        "Pranam",
+        "Good morning teacher",
+        "Good night",
+        "नमस्ते",
+        "नमस्कार जी",
+    ):
+        assert service._is_greeting(greeting), greeting
+
+
+def test_day_book_pages_fall_back_to_printed_page_numbers(db_session):
+    _create_embedding_tables(db_session)
+    db_session.execute(
+        text(
+            """
+            UPDATE embeddings_book_subsections
+            SET printed_start_page = NULL,
+                printed_end_page = NULL,
+                printed_page_numbers = '2,3,4'
+            WHERE id = :id
+            """
+        ),
+        {"id": SUBSECTION_ID},
+    )
+    db_session.commit()
+
+    service = ConversationService(db_session)
+    lesson = service.embedding_content_repo.get_lesson_by_chapter_id(CHAPTER_ID)
+    subsections = service.embedding_content_repo.list_subsections_for_lesson(lesson)
+
+    assert len(subsections) == 1
+    assert subsections[0].printed_start_page == "2"
+    assert subsections[0].printed_end_page == "4"
+    assert subsections[0].display_pages == "2-4"
+
+
+def test_day_book_pages_fall_back_to_page_extractions(db_session):
+    _create_embedding_tables(db_session)
+    db_session.execute(
+        text(
+            """
+            UPDATE embeddings_book_subsections
+            SET printed_start_page = NULL,
+                printed_end_page = NULL,
+                printed_page_numbers = ''
+            WHERE id = :id
+            """
+        ),
+        {"id": SUBSECTION_ID},
+    )
+    db_session.commit()
+
+    service = ConversationService(db_session)
+    lesson = service.embedding_content_repo.get_lesson_by_chapter_id(CHAPTER_ID)
+    subsections = service.embedding_content_repo.list_subsections_for_lesson(lesson)
+
+    assert len(subsections) == 1
+    assert subsections[0].printed_start_page == "2"
+    assert subsections[0].printed_end_page == "4"
+    assert subsections[0].display_pages == "2-4"
+
+
+def test_selected_day_requery_hydrates_book_pages_from_page_extractions(db_session):
+    _create_embedding_tables(db_session)
+    db_session.execute(
+        text(
+            """
+            UPDATE embeddings_book_subsections
+            SET printed_start_page = NULL,
+                printed_end_page = NULL,
+                printed_page_numbers = ''
+            WHERE id = :id
+            """
+        ),
+        {"id": SUBSECTION_ID},
+    )
+    db_session.commit()
+
+    service = ConversationService(db_session)
+    subsection = service.embedding_content_repo.get_subsection_by_id(SUBSECTION_ID)
+
+    assert subsection is not None
+    assert subsection.printed_start_page == "2"
+    assert subsection.printed_end_page == "4"
+    assert subsection.display_pages == "2-4"
+
+
+def test_customize_repairs_stale_not_available_day_range_from_page_extractions(db_session):
+    _prepare_generated_lesson_session(db_session)
+    db_session.execute(
+        text(
+            """
+            UPDATE embeddings_book_subsections
+            SET printed_start_page = NULL,
+                printed_end_page = NULL,
+                printed_page_numbers = ''
+            WHERE id = :id
+            """
+        ),
+        {"id": SUBSECTION_ID},
+    )
+    session = db_session.query(SessionState).filter(SessionState.whatsapp_number == PHONE).one()
+    session.temp_lesson_book_pages = "Not available"
+    session.temp_lesson_printed_start_page = None
+    session.temp_lesson_printed_end_page = None
+    # Keep the selected day's internal physical bounds. These are used only
+    # to recover the book labels from page_extractions and are never shown.
+    session.temp_lesson_pdf_start_page = 11
+    session.temp_lesson_pdf_end_page = 13
+    db_session.commit()
+
+    service = ConversationService(db_session)
+    reply = service.handle_message(PHONE, "customize_generated_lesson")
+
+    assert reply.current_state == ConversationState.NEW_LESSON_CUSTOMIZE_FROM_PAGE.value
+    assert "Current book-page range: 2-4" in reply.reply
+    assert "chapter book-page range: 1-5" in reply.reply
+    assert "Current book-page range: Not available" not in reply.reply
+
+    db_session.refresh(session)
+    assert session.temp_lesson_book_pages == "2-4"
+    assert session.temp_lesson_printed_start_page == "2"
+    assert session.temp_lesson_printed_end_page == "4"
+
+
+def test_day_menu_book_pages_recover_when_parent_pdf_bounds_are_missing(db_session):
+    _create_embedding_tables(db_session)
+    db_session.execute(
+        text(
+            """
+            UPDATE embeddings_book_chapters
+            SET pdf_start_page = NULL,
+                pdf_end_page = NULL
+            WHERE id = :id
+            """
+        ),
+        {"id": CHAPTER_ID},
+    )
+    db_session.execute(
+        text(
+            """
+            UPDATE embeddings_book_subsections
+            SET printed_start_page = NULL,
+                printed_end_page = NULL,
+                printed_page_numbers = ''
+            WHERE id = :id
+            """
+        ),
+        {"id": SUBSECTION_ID},
+    )
+    db_session.commit()
+
+    service = ConversationService(db_session)
+    lesson = service.embedding_content_repo.get_lesson_by_chapter_id(CHAPTER_ID)
+    assert lesson is not None
+    assert lesson.pdf_start_page is None
+    assert lesson.pdf_end_page is None
+
+    subsections = service.embedding_content_repo.list_subsections_for_lesson(lesson)
+    assert len(subsections) == 1
+    assert subsections[0].display_pages == "2-4"
+
+    reply = service._lesson_day_reply(
+        lesson=lesson,
+        subsections=subsections,
+        summary="Summary",
+        language="English",
+    )
+    assert reply.outbound is not None
+    assert "Book Pages 2-4" in reply.outbound["rows"][0]["description"]

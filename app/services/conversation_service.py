@@ -25,6 +25,7 @@ from app.state_machine.states import ConversationState
 from app.utils.lesson_title_localization import localize_lesson_display_title
 from app.utils.profile_validation import validate_profile_grade, validate_profile_subject
 from app.utils.subject_normalization import normalize_subject, subject_display_name
+from app.utils.toc_terminology import toc_label
 from app.utils.text import clean_text, normalize_choice, normalize_grade, parse_duration_minutes
 
 logger = get_logger(__name__)
@@ -62,14 +63,14 @@ TEXT: dict[str, dict[str, str]] = {
         "all_lessons_next": "अगला पेज",
         "all_lessons_previous": "पिछला पेज",
         "new_lesson_without_profile": "कृपया पहले अपनी प्रोफ़ाइल पूरी करें।\nआपका नाम क्या है?",
-        "new_lesson_topic_prompt": "कृपया नीचे दी गई सूची से अध्याय चुनें।",
-        "new_lesson_topic_invalid": "कृपया सूची से सही अध्याय चुनें।",
-        "lesson_topic_header": "अध्याय चुनें",
-        "lesson_topic_body": "ग्रेड और विषय के आधार पर अध्याय चुनें। पेज {page}/{total_pages}.",
-        "lesson_topic_button": "अध्याय",
-        "lesson_topic_section": "अध्याय",
-        "lesson_topic_footer": "नीचे एक अध्याय टैप करें।",
-        "lesson_topic_empty": "{school_name} में कक्षा {grade} / {subject} के लिए कोई अध्याय नहीं मिला। कृपया विषय फिर से लिखें या मुख्य मेनू पर वापस जाएँ।",
+        "new_lesson_topic_prompt": "कृपया नीचे पुस्तक की विषय-सूची (TOC) से सही पाठ/अध्याय चुनें।",
+        "new_lesson_topic_invalid": "कृपया पुस्तक की विषय-सूची (TOC) से सही विकल्प चुनें।",
+        "lesson_topic_header": "पुस्तक TOC से चुनें",
+        "lesson_topic_body": "ग्रेड और विषय के आधार पर पुस्तक TOC से विकल्प चुनें। पेज {page}/{total_pages}.",
+        "lesson_topic_button": "पुस्तक TOC",
+        "lesson_topic_section": "पुस्तक TOC",
+        "lesson_topic_footer": "नीचे सही TOC विकल्प टैप करें।",
+        "lesson_topic_empty": "{school_name} में कक्षा {grade} / {subject} के लिए पुस्तक TOC का कोई विकल्प नहीं मिला। कृपया विषय फिर से लिखें या मुख्य मेनू पर वापस जाएँ।",
         "lesson_topic_next": "अगला पेज",
         "lesson_topic_previous": "पिछला पेज",
         "new_lesson_grade_prompt": "इस पाठ के लिए ग्रेड/कक्षा लिखें। उदाहरण: 1, 2, 3",
@@ -87,23 +88,23 @@ TEXT: dict[str, dict[str, str]] = {
         "print_lesson_failed": "पाठ योजना PDF नहीं बन सकी। कृपया फिर से Print Lesson चुनें।",
         "print_lesson_caption": "Teacher Helper - पाठ योजना",
         "customize_header": "पाठ बदलें",
-        "customize_body": "वर्तमान पेज: {current_range}\nअध्याय की सीमा: {chapter_range}\nचुना हुआ From Page: {from_page}\nचुना हुआ To Page: {to_page}",
+        "customize_body": "वर्तमान पुस्तक पृष्ठ सीमा: {current_range}\n{item_type} पुस्तक पृष्ठ सीमा: {chapter_range}\nचुना हुआ From Book Page: {from_page}\nचुना हुआ To Book Page: {to_page}",
         "not_selected": "नहीं चुना गया",
         "customize_button": "विकल्प",
         "customize_section": "पेज बदलें",
         "customize_footer": "From/To बदलें, फिर updated lesson बनाएँ।",
-        "customize_invalid": "कृपया From Page, To Page, बनाएँ/सेव करें या वापस चुनें।",
-        "customize_from_row": "1. From Page",
-        "customize_to_row": "2. To Page",
+        "customize_invalid": "कृपया From Book Page, To Book Page, बनाएँ/सेव करें या वापस चुनें।",
+        "customize_from_row": "1. From Book Page",
+        "customize_to_row": "2. To Book Page",
         "customize_create_row": "4. बनाएँ/सेव करें",
         "customize_back_row": "5. वापस",
-        "customize_from_prompt": "नया From Page लिखें। यह वर्तमान अध्याय की सीमा {chapter_range} के भीतर होना चाहिए।",
-        "customize_to_prompt": "नया To Page लिखें। यह वर्तमान अध्याय की सीमा {chapter_range} के भीतर होना चाहिए।",
-        "customize_page_invalid": "यह पेज वर्तमान अध्याय में नहीं है। उपलब्ध अध्याय सीमा: {chapter_range}।",
-        "customize_range_invalid": "From Page, To Page से आगे नहीं हो सकता और सभी चुने हुए पेज लगातार होने चाहिए। वर्तमान चयन: {from_page}-{to_page}।",
-        "customize_pages_unavailable": "इस अध्याय के page_extractions उपलब्ध नहीं हैं, इसलिए पेज के अनुसार बदलाव नहीं किया जा सकता।",
-        "customize_text_unavailable": "चुने हुए पेजों में पाठ बनाने के लिए टेक्स्ट नहीं मिला। कृपया दूसरी लगातार पेज सीमा चुनें।",
-        "customized_lesson_prefix": "यह चुने हुए पेजों से दोबारा तैयार किया गया पाठ है:",
+        "customize_from_prompt": "नया From Book Page लिखें। यह {item_type} की पुस्तक पृष्ठ सीमा {chapter_range} के भीतर होना चाहिए।",
+        "customize_to_prompt": "नया To Book Page लिखें। यह {item_type} की पुस्तक पृष्ठ सीमा {chapter_range} के भीतर होना चाहिए।",
+        "customize_page_invalid": "यह पुस्तक पृष्ठ इस {item_type} में नहीं है। उपलब्ध पुस्तक पृष्ठ सीमा: {chapter_range}।",
+        "customize_range_invalid": "From Book Page, To Book Page से आगे नहीं हो सकता और सभी चुने हुए पुस्तक पृष्ठ लगातार होने चाहिए। वर्तमान चयन: {from_page}-{to_page}।",
+        "customize_pages_unavailable": "इस {item_type} के पुस्तक-पृष्ठ extraction उपलब्ध नहीं हैं, इसलिए पुस्तक पृष्ठ के अनुसार बदलाव नहीं किया जा सकता।",
+        "customize_text_unavailable": "चुने हुए पुस्तक पृष्ठों में पाठ बनाने के लिए टेक्स्ट नहीं मिला। कृपया दूसरी लगातार पुस्तक-पृष्ठ सीमा चुनें।",
+        "customized_lesson_prefix": "यह चुने हुए पुस्तक पृष्ठों से दोबारा तैयार किया गया पाठ है:",
         "save_body": "क्या आप इस पाठ को सेव करना चाहते हैं?",
         "save_footer": "एक विकल्प चुनें",
         "btn_save": "पाठ सेव करें",
@@ -131,15 +132,15 @@ TEXT: dict[str, dict[str, str]] = {
         "school_list_section": "Schools",
         "school_list_footer": "नीचे एक स्कूल टैप करें।",
         "new_lesson_no_school": "पाठ योजना बनाने से पहले कृपया प्रोफ़ाइल अपडेट करके स्कूल चुनें।",
-        "lesson_no_match": "इसके लिए कोई अध्याय नहीं मिला: {topic}\n\nकृपया किताब का सही chapter title लिखें।",
-        "lesson_summary_intro": "मुझे यह अध्याय मिला:\n{title}\nपुस्तक पेज: {pages}\n\nसरल सारांश:\n{summary}\n\nअब detailed पाठ योजना के लिए दिन चुनें।",
+        "lesson_no_match": "इसके लिए पुस्तक TOC में कोई मिलान नहीं मिला: {topic}\n\nकृपया किताब की विषय-सूची से सही शीर्षक लिखें।",
+        "lesson_summary_intro": "मुझे यह {item_type} मिला:\n{title}\nपुस्तक पृष्ठ: {pages}\n\nसरल सारांश:\n{summary}\n\nअब detailed पाठ योजना के लिए दिन चुनें।",
         "lesson_day_header": "दिन चुनें",
         "lesson_day_body": "एक दिन चुनें।",
         "lesson_day_button": "दिन",
         "lesson_day_section": "दिन",
         "day_label": "दिन {number}",
-        "chapter_number_label": "अध्याय {number}",
-        "pages_label": "पेज {pages}",
+        "chapter_number_label": "{item_type} {number}",
+        "pages_label": "पुस्तक पृष्ठ {pages}",
         "lesson_day_footer": "नीचे एक दिन टैप करें।",
         "lesson_day_invalid": "कृपया सूची से सही दिन चुनें।",
         "profile_grade_prompt": "आपकी डिफ़ॉल्ट ग्रेड/कक्षा क्या है? उदाहरण: 1, 2, 3",
@@ -213,14 +214,14 @@ TEXT: dict[str, dict[str, str]] = {
         "all_lessons_next": "Next Page",
         "all_lessons_previous": "Previous Page",
         "new_lesson_without_profile": "Please complete your profile first.\nWhat is your name?",
-        "new_lesson_topic_prompt": "Please select the chapter you would like to teach from the list below.",
-        "new_lesson_topic_invalid": "Please select a valid chapter from the list below.",
-        "lesson_topic_header": "Choose Chapter",
-        "lesson_topic_body": "Select a chapter for the grade and subject you entered. Page {page}/{total_pages}.",
-        "lesson_topic_button": "Chapters",
-        "lesson_topic_section": "Chapters",
-        "lesson_topic_footer": "Tap one chapter below.",
-        "lesson_topic_empty": "No chapter was found for {school_name}, Class {grade}, {subject}. Please enter the subject again, or send Main Menu to go back.",
+        "new_lesson_topic_prompt": "Please select what you would like to teach from the book TOC below.",
+        "new_lesson_topic_invalid": "Please select a valid item from the book TOC below.",
+        "lesson_topic_header": "Choose from Book TOC",
+        "lesson_topic_body": "Select an item from the book TOC for the grade and subject you entered. Page {page}/{total_pages}.",
+        "lesson_topic_button": "Book TOC",
+        "lesson_topic_section": "Book TOC",
+        "lesson_topic_footer": "Tap one TOC item below.",
+        "lesson_topic_empty": "No book TOC item was found for {school_name}, Class {grade}, {subject}. Please enter the subject again, or send Main Menu to go back.",
         "lesson_topic_next": "Next Page",
         "lesson_topic_previous": "Previous Page",
         "new_lesson_grade_prompt": "Please enter the grade/class for this lesson. Example: 1, 2, 3",
@@ -238,23 +239,23 @@ TEXT: dict[str, dict[str, str]] = {
         "print_lesson_failed": "The lesson plan PDF could not be created. Please choose Print Lesson again.",
         "print_lesson_caption": "Teacher Helper - Lesson Plan",
         "customize_header": "Customize Lesson",
-        "customize_body": "Current page range: {current_range}\nChapter page range: {chapter_range}\nSelected From Page: {from_page}\nSelected To Page: {to_page}",
+        "customize_body": "Current book-page range: {current_range}\n{item_type} book-page range: {chapter_range}\nSelected From Book Page: {from_page}\nSelected To Book Page: {to_page}",
         "not_selected": "Not selected",
         "customize_button": "Options",
         "customize_section": "Change Pages",
-        "customize_footer": "Change From/To pages, then create and save the updated lesson.",
-        "customize_invalid": "Please choose From Page, To Page, Create/Save, or Back.",
-        "customize_from_row": "1. From Page",
-        "customize_to_row": "2. To Page",
+        "customize_footer": "Change From/To Book Pages, then create and save the updated lesson.",
+        "customize_invalid": "Please choose From Book Page, To Book Page, Create/Save, or Back.",
+        "customize_from_row": "1. From Book Page",
+        "customize_to_row": "2. To Book Page",
         "customize_create_row": "4. Create/Save",
         "customize_back_row": "5. Back",
-        "customize_from_prompt": "Enter the new From Page. It must be within the current chapter range: {chapter_range}.",
-        "customize_to_prompt": "Enter the new To Page. It must be within the current chapter range: {chapter_range}.",
-        "customize_page_invalid": "That page is not inside the current chapter. Available chapter range: {chapter_range}.",
-        "customize_range_invalid": "From Page cannot be after To Page, and every selected page must be contiguous. Current selection: {from_page}-{to_page}.",
-        "customize_pages_unavailable": "Page-level extraction is not available for this chapter, so the lesson cannot be customized by page.",
-        "customize_text_unavailable": "No usable text was found in the selected pages. Please choose another contiguous page range.",
-        "customized_lesson_prefix": "Here is the lesson regenerated from your selected pages:",
+        "customize_from_prompt": "Enter the new From Book Page. It must be within this {item_type} book-page range: {chapter_range}.",
+        "customize_to_prompt": "Enter the new To Book Page. It must be within this {item_type} book-page range: {chapter_range}.",
+        "customize_page_invalid": "That book page is not inside this {item_type}. Available book-page range: {chapter_range}.",
+        "customize_range_invalid": "From Book Page cannot be after To Book Page, and every selected book page must be contiguous. Current selection: {from_page}-{to_page}.",
+        "customize_pages_unavailable": "Book-page extraction is not available for this {item_type}, so the lesson cannot be customized by book page.",
+        "customize_text_unavailable": "No usable text was found in the selected book pages. Please choose another contiguous book-page range.",
+        "customized_lesson_prefix": "Here is the lesson regenerated from your selected book pages:",
         "save_body": "Do you want to save this lesson?",
         "save_footer": "Choose one option",
         "btn_save": "Save Lesson",
@@ -282,15 +283,15 @@ TEXT: dict[str, dict[str, str]] = {
         "school_list_section": "Schools",
         "school_list_footer": "Tap one school below.",
         "new_lesson_no_school": "Please update your profile and choose your school before creating a lesson plan.",
-        "lesson_no_match": "No matching chapter was found for: {topic}\n\nPlease type the exact chapter title from the book.",
-        "lesson_summary_intro": "I found this chapter:\n{title}\nBook Pages: {pages}\n\nSimple summary:\n{summary}\n\nNow choose the day for the detailed lesson plan.",
+        "lesson_no_match": "No matching item was found in the book TOC for: {topic}\n\nPlease type the exact title from the book TOC.",
+        "lesson_summary_intro": "I found this {item_type}:\n{title}\nBook Pages: {pages}\n\nSimple summary:\n{summary}\n\nNow choose the day for the detailed lesson plan.",
         "lesson_day_header": "Choose Day",
         "lesson_day_body": "Select one day.",
         "lesson_day_button": "Days",
         "lesson_day_section": "Days",
         "day_label": "Day {number}",
-        "chapter_number_label": "Chapter {number}",
-        "pages_label": "Pages {pages}",
+        "chapter_number_label": "{item_type} {number}",
+        "pages_label": "Book Pages {pages}",
         "lesson_day_footer": "Tap one day below.",
         "lesson_day_invalid": "Please choose a valid day from the list.",
         "profile_grade_prompt": "What is your default grade/class? Example: 1, 2, 3",
@@ -364,14 +365,14 @@ TEXT: dict[str, dict[str, str]] = {
         "all_lessons_next": "Next Page",
         "all_lessons_previous": "Previous Page",
         "new_lesson_without_profile": "Please pehle apni profile complete karein.\nAapka naam kya hai?",
-        "new_lesson_topic_prompt": "Please neeche list se chapter choose karein.",
-        "new_lesson_topic_invalid": "Please list se valid chapter choose karein.",
-        "lesson_topic_header": "Choose Chapter",
-        "lesson_topic_body": "Entered grade aur subject ke liye chapter choose karein. Page {page}/{total_pages}.",
-        "lesson_topic_button": "Chapters",
-        "lesson_topic_section": "Chapters",
-        "lesson_topic_footer": "Neeche ek chapter tap karein.",
-        "lesson_topic_empty": "{school_name} mein Class {grade} / {subject} ke liye koi chapter nahi mila. Please subject phir se likhein ya Main Menu bhejein.",
+        "new_lesson_topic_prompt": "Please neeche book TOC se jo padhana hai woh choose karein.",
+        "new_lesson_topic_invalid": "Please book TOC se valid item choose karein.",
+        "lesson_topic_header": "Choose from Book TOC",
+        "lesson_topic_body": "Entered grade aur subject ke liye book TOC item choose karein. Page {page}/{total_pages}.",
+        "lesson_topic_button": "Book TOC",
+        "lesson_topic_section": "Book TOC",
+        "lesson_topic_footer": "Neeche ek TOC item tap karein.",
+        "lesson_topic_empty": "{school_name} mein Class {grade} / {subject} ke liye koi book TOC item nahi mila. Please subject phir se likhein ya Main Menu bhejein.",
         "lesson_topic_next": "Next Page",
         "lesson_topic_previous": "Previous Page",
         "new_lesson_grade_prompt": "Is lesson ke liye grade/class likhein. Example: 1, 2, 3",
@@ -389,23 +390,23 @@ TEXT: dict[str, dict[str, str]] = {
         "print_lesson_failed": "Lesson plan PDF create nahi ho saki. Please Print Lesson dobara choose karein.",
         "print_lesson_caption": "Teacher Helper - Lesson Plan",
         "customize_header": "Customize Lesson",
-        "customize_body": "Current page range: {current_range}\nChapter page range: {chapter_range}\nSelected From Page: {from_page}\nSelected To Page: {to_page}",
+        "customize_body": "Current book-page range: {current_range}\n{item_type} book-page range: {chapter_range}\nSelected From Book Page: {from_page}\nSelected To Book Page: {to_page}",
         "not_selected": "Not selected",
         "customize_button": "Options",
         "customize_section": "Change Pages",
-        "customize_footer": "From/To pages change karke updated lesson create/save karein.",
-        "customize_invalid": "Please From Page, To Page, Create/Save ya Back choose karein.",
-        "customize_from_row": "1. From Page",
-        "customize_to_row": "2. To Page",
+        "customize_footer": "From/To Book Pages change karke updated lesson create/save karein.",
+        "customize_invalid": "Please From Book Page, To Book Page, Create/Save ya Back choose karein.",
+        "customize_from_row": "1. From Book Page",
+        "customize_to_row": "2. To Book Page",
         "customize_create_row": "4. Create/Save",
         "customize_back_row": "5. Back",
-        "customize_from_prompt": "New From Page likhein. Yeh current chapter range {chapter_range} ke andar hona chahiye.",
-        "customize_to_prompt": "New To Page likhein. Yeh current chapter range {chapter_range} ke andar hona chahiye.",
-        "customize_page_invalid": "Yeh page current chapter ke andar nahi hai. Available chapter range: {chapter_range}.",
-        "customize_range_invalid": "From Page, To Page ke baad nahi ho sakta aur selected pages contiguous hone chahiye. Current selection: {from_page}-{to_page}.",
-        "customize_pages_unavailable": "Is chapter ke page_extractions available nahi hain, isliye page-wise customization possible nahi hai.",
-        "customize_text_unavailable": "Selected pages mein usable text nahi mila. Please doosra contiguous page range choose karein.",
-        "customized_lesson_prefix": "Yeh selected pages se regenerated lesson hai:",
+        "customize_from_prompt": "New From Book Page likhein. Yeh {item_type} book-page range {chapter_range} ke andar hona chahiye.",
+        "customize_to_prompt": "New To Book Page likhein. Yeh {item_type} book-page range {chapter_range} ke andar hona chahiye.",
+        "customize_page_invalid": "Yeh book page is {item_type} ke andar nahi hai. Available book-page range: {chapter_range}.",
+        "customize_range_invalid": "From Book Page, To Book Page ke baad nahi ho sakta aur selected book pages contiguous hone chahiye. Current selection: {from_page}-{to_page}.",
+        "customize_pages_unavailable": "Is {item_type} ke book-page extractions available nahi hain, isliye book-page customization possible nahi hai.",
+        "customize_text_unavailable": "Selected book pages mein usable text nahi mila. Please doosra contiguous book-page range choose karein.",
+        "customized_lesson_prefix": "Yeh selected book pages se regenerated lesson hai:",
         "save_body": "Kya aap is lesson ko save karna chahte hain?",
         "save_footer": "Ek option choose karein",
         "btn_save": "Save Lesson",
@@ -433,15 +434,15 @@ TEXT: dict[str, dict[str, str]] = {
         "school_list_section": "Schools",
         "school_list_footer": "Neeche ek school tap karein.",
         "new_lesson_no_school": "Lesson plan create karne se pehle please profile update karke school choose karein.",
-        "lesson_no_match": "Is topic ke liye matching chapter nahi mila: {topic}\n\nPlease book ka exact chapter title type karein.",
-        "lesson_summary_intro": "Mujhe yeh chapter mila:\n{title}\nBook Pages: {pages}\n\nSimple summary:\n{summary}\n\nAb detailed lesson plan ke liye day choose karein.",
+        "lesson_no_match": "Is topic ke liye book TOC mein matching item nahi mila: {topic}\n\nPlease book TOC ka exact title type karein.",
+        "lesson_summary_intro": "Mujhe yeh {item_type} mila:\n{title}\nBook Pages: {pages}\n\nSimple summary:\n{summary}\n\nAb detailed lesson plan ke liye day choose karein.",
         "lesson_day_header": "Choose Day",
         "lesson_day_body": "Ek day select karein.",
         "lesson_day_button": "Days",
         "lesson_day_section": "Days",
         "day_label": "Day {number}",
-        "chapter_number_label": "Chapter {number}",
-        "pages_label": "Pages {pages}",
+        "chapter_number_label": "{item_type} {number}",
+        "pages_label": "Book Pages {pages}",
         "lesson_day_footer": "Neeche ek day tap karein.",
         "lesson_day_invalid": "Please list se valid day choose karein.",
         "profile_grade_prompt": "Aapki default grade/class kya hai? Example: 1, 2, 3",
@@ -522,6 +523,15 @@ class ConversationService:
         log_event(logger, "conversation_inbound", whatsapp_number=whatsapp_number, state=state.value, body=text)
 
         choice = normalize_choice(text)
+        # A greeting is a global home command. This prevents values such as
+        # "Hi"/"Hello"/"Namaste" from being accidentally stored as a profile
+        # field, page choice, lesson name, feedback answer, etc.
+        if self._is_greeting(choice):
+            teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+            language = self._teacher_language(teacher, whatsapp_number)
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply(self._text(language, "welcome"), language)
+
         if state != ConversationState.MAIN_MENU and self._is_main_menu_choice(choice):
             teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
             language = self._teacher_language(teacher, whatsapp_number)
@@ -671,22 +681,31 @@ class ConversationService:
         return localized
 
     def _is_greeting(self, choice: str) -> bool:
-        return choice in {
-            "hi",
-            "hello",
-            "hey",
-            "hii",
-            "hiii",
-            "helo",
-            "hola",
-            "good morning",
-            "good afternoon",
-            "good evening",
-            "start",
-            "नमस्ते",
-            "नमस्कार",
-            "शुरू",
+        normalized = re.sub(r"[^0-9a-zA-Z\u0900-\u097F]+", " ", (choice or "").casefold()).strip()
+        if not normalized:
+            return False
+        exact_greetings = {
+            "hi", "hii", "hiii", "hello", "helo", "hey", "hola",
+            "namaste", "namaskar", "pranam", "hello ji", "hi ji", "namaste ji",
+            "good morning", "good afternoon", "good evening", "good night", "start",
+            "नमस्ते", "नमस्कार", "प्रणाम", "नमस्ते जी", "नमस्कार जी", "शुरू",
         }
+        if normalized in exact_greetings:
+            return True
+        # Treat a message beginning with an unambiguous greeting as the same
+        # global home command, e.g. "Hello teacher" or "Namaste sir".
+        return bool(
+            re.match(
+                r"^(?:hi+|hello|helo|hey|hola|namaste|namaskar|pranam|good\s+(?:morning|afternoon|evening|night)|नमस्ते|नमस्कार|प्रणाम)(?:\s|$)",
+                normalized,
+            )
+        )
+
+    def _toc_item_label(self, lesson: EmbeddingLessonMatch, language: str, *, title_case: bool = False) -> str:
+        label = toc_label(lesson.toc_kind, language)
+        if title_case or language_key(language) == "hindi":
+            return label
+        return label.casefold()
 
     def _is_keep_value(self, text: str) -> bool:
         return normalize_choice(text) in {"same", "skip", "keep", "current", "सेम", "समान"}
@@ -874,6 +893,7 @@ class ConversationService:
             normalize_subject(session.temp_profile_subject or getattr(teacher, "default_subject", "") or ""),
             language=language,
         )
+        source_lesson = self.embedding_content_repo.get_lesson_by_chapter_id(session.temp_content_chapter_id or "")
         metadata = LessonPdfMetadata(
             teacher_name=getattr(teacher, "teacher_name", "") or "",
             school_name=session.temp_lesson_school_name or getattr(teacher, "school_name", "") or "",
@@ -883,6 +903,8 @@ class ConversationService:
             book_title=session.temp_lesson_book_title or "",
             chapter_title=session.temp_lesson_chapter_title or session.temp_topic or "",
             section_title=session.temp_lesson_section_title or "",
+            content_type_label=(toc_label(source_lesson.toc_kind, language) if source_lesson else ""),
+            content_title=(source_lesson.title if source_lesson else ""),
             day_title=day_title,
             pages=session.temp_lesson_book_pages or "",
             is_customized=bool(session.temp_lesson_is_customized),
@@ -948,13 +970,10 @@ class ConversationService:
         prefix: str | None = None,
     ) -> ConversationReply:
         chapter_range = self._chapter_page_range(lesson, pages)
-        current_range = session.temp_lesson_book_pages or lesson.display_pages
-        from_page = session.temp_customize_from_page or session.temp_lesson_printed_start_page or (
-            f"PDF {session.temp_lesson_pdf_start_page}" if session.temp_lesson_pdf_start_page else self._text(language, "not_selected")
-        )
-        to_page = session.temp_customize_to_page or session.temp_lesson_printed_end_page or (
-            f"PDF {session.temp_lesson_pdf_end_page}" if session.temp_lesson_pdf_end_page else self._text(language, "not_selected")
-        )
+        current_range = self._current_day_book_page_range(session, lesson, pages)
+        item_type = self._toc_item_label(lesson, language)
+        from_page = session.temp_customize_from_page or session.temp_lesson_printed_start_page or self._text(language, "not_selected")
+        to_page = session.temp_customize_to_page or session.temp_lesson_printed_end_page or self._text(language, "not_selected")
         body = self._text(
             language,
             "customize_body",
@@ -962,6 +981,7 @@ class ConversationService:
             chapter_range=chapter_range,
             from_page=from_page,
             to_page=to_page,
+            item_type=item_type,
         )
         reply_parts = [prefix.strip()] if prefix else []
         reply_parts.append(body)
@@ -994,14 +1014,15 @@ class ConversationService:
         prefix: str | None = None,
     ) -> ConversationReply:
         chapter_range = self._chapter_page_range(lesson, pages)
-        current_range = session.temp_lesson_book_pages or lesson.display_pages
+        current_range = self._current_day_book_page_range(session, lesson, pages)
+        item_type = self._toc_item_label(lesson, language)
         parts = []
         if prefix:
             parts.append(prefix.strip())
         parts.append(
             f"{self._text(language, 'customize_header')}\n"
-            f"{self._text(language, 'customize_body', current_range=current_range, chapter_range=chapter_range, from_page=self._text(language, 'not_selected'), to_page=self._text(language, 'not_selected'))}\n\n"
-            f"{self._text(language, 'customize_from_prompt', chapter_range=chapter_range)}"
+            f"{self._text(language, 'customize_body', current_range=current_range, chapter_range=chapter_range, from_page=self._text(language, 'not_selected'), to_page=self._text(language, 'not_selected'), item_type=item_type)}\n\n"
+            f"{self._text(language, 'customize_from_prompt', chapter_range=chapter_range, item_type=item_type)}"
         )
         return self._reply(
             "\n\n".join(parts),
@@ -1018,28 +1039,100 @@ class ConversationService:
         prefix: str | None = None,
     ) -> ConversationReply:
         chapter_range = self._chapter_page_range(lesson, pages)
-        current_range = session.temp_lesson_book_pages or lesson.display_pages
+        current_range = self._current_day_book_page_range(session, lesson, pages)
+        item_type = self._toc_item_label(lesson, language)
         from_page = session.temp_customize_from_page or self._text(language, "not_selected")
         parts = []
         if prefix:
             parts.append(prefix.strip())
         parts.append(
             f"{self._text(language, 'customize_header')}\n"
-            f"{self._text(language, 'customize_body', current_range=current_range, chapter_range=chapter_range, from_page=from_page, to_page=self._text(language, 'not_selected'))}\n\n"
-            f"{self._text(language, 'customize_to_prompt', chapter_range=chapter_range)}"
+            f"{self._text(language, 'customize_body', current_range=current_range, chapter_range=chapter_range, from_page=from_page, to_page=self._text(language, 'not_selected'), item_type=item_type)}\n\n"
+            f"{self._text(language, 'customize_to_prompt', chapter_range=chapter_range, item_type=item_type)}"
         )
         return self._reply(
             "\n\n".join(parts),
             ConversationState.NEW_LESSON_CUSTOMIZE_TO_PAGE,
         )
 
+    @staticmethod
+    def _is_missing_book_page_range(value: str | None) -> bool:
+        normalized = re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+        return normalized in {
+            "",
+            "not available",
+            "n/a",
+            "na",
+            "none",
+            "null",
+            "not selected",
+        }
+
+    def _current_day_book_page_range(
+        self,
+        session,
+        lesson: EmbeddingLessonMatch,
+        pages: list[EmbeddingPageExtraction],
+    ) -> str:
+        """Resolve the current selected day's teacher-facing book-page range.
+
+        Do not trust an old session value containing the literal
+        ``Not available``. Prefer the selected day's stored printed bounds,
+        then recover from page_extractions using the selected day's internal
+        PDF coordinates. Physical PDF numbers are never displayed.
+        """
+        stored = getattr(session, "temp_lesson_book_pages", None)
+        if not self._is_missing_book_page_range(stored):
+            return str(stored).strip()
+
+        printed_start = getattr(session, "temp_lesson_printed_start_page", None)
+        printed_end = getattr(session, "temp_lesson_printed_end_page", None)
+        if printed_start and printed_end:
+            if str(printed_start).strip() == str(printed_end).strip():
+                return str(printed_start).strip()
+            return f"{str(printed_start).strip()}-{str(printed_end).strip()}"
+
+        pdf_start = getattr(session, "temp_lesson_pdf_start_page", None)
+        pdf_end = getattr(session, "temp_lesson_pdf_end_page", None)
+        if pdf_start is not None and pdf_end is not None:
+            selected_book_pages = [
+                page
+                for page in pages
+                if pdf_start <= page.pdf_page_number <= pdf_end and page.book_page_label
+            ]
+            if selected_book_pages:
+                start_label = selected_book_pages[0].display_page
+                end_label = selected_book_pages[-1].display_page
+                resolved = start_label if start_label == end_label else f"{start_label}-{end_label}"
+                # Repair stale session state while we have authoritative data.
+                session.temp_lesson_book_pages = resolved
+                session.temp_lesson_printed_start_page = start_label
+                session.temp_lesson_printed_end_page = end_label
+                # Persist the repaired metadata because each WhatsApp message
+                # may run in a fresh database session/request.
+                self.session_repo.save(session)
+                return resolved
+
+        subsection_id = getattr(session, "temp_content_subsection_id", None)
+        if subsection_id:
+            subsection = self.embedding_content_repo.get_subsection_by_id(subsection_id)
+            if subsection and not self._is_missing_book_page_range(subsection.display_pages):
+                session.temp_lesson_book_pages = subsection.display_pages
+                session.temp_lesson_printed_start_page = subsection.printed_start_page
+                session.temp_lesson_printed_end_page = subsection.printed_end_page
+                self.session_repo.save(session)
+                return subsection.display_pages
+
+        return lesson.display_pages
+
     def _chapter_page_range(
         self,
         lesson: EmbeddingLessonMatch,
         pages: list[EmbeddingPageExtraction],
     ) -> str:
-        if pages:
-            return f"{pages[0].display_page}-{pages[-1].display_page}"
+        book_pages = [page for page in pages if page.book_page_label]
+        if book_pages:
+            return f"{book_pages[0].display_page}-{book_pages[-1].display_page}"
         return lesson.display_pages
 
     def _initialize_custom_page_selection(
@@ -1047,18 +1140,15 @@ class ConversationService:
         session,
         pages: list[EmbeddingPageExtraction],
     ) -> None:
-        start_choice = session.temp_lesson_printed_start_page or (
-            f"PDF {session.temp_lesson_pdf_start_page}" if session.temp_lesson_pdf_start_page else None
-        )
-        end_choice = session.temp_lesson_printed_end_page or (
-            f"PDF {session.temp_lesson_pdf_end_page}" if session.temp_lesson_pdf_end_page else None
-        )
+        start_choice = session.temp_lesson_printed_start_page or None
+        end_choice = session.temp_lesson_printed_end_page or None
         start_page = self.embedding_content_repo.resolve_page_choice(pages, start_choice)
         end_page = self.embedding_content_repo.resolve_page_choice(pages, end_choice)
-        if not start_page and pages:
-            start_page = pages[0]
-        if not end_page and pages:
-            end_page = pages[-1]
+        book_pages = [page for page in pages if page.book_page_label]
+        if not start_page and book_pages:
+            start_page = book_pages[0]
+        if not end_page and book_pages:
+            end_page = book_pages[-1]
         session.temp_customize_from_page = start_page.display_page if start_page else start_choice
         session.temp_customize_to_page = end_page.display_page if end_page else end_choice
 
@@ -1086,10 +1176,15 @@ class ConversationService:
         for index, lesson in enumerate(page_lessons, start=start_index + 1):
             title = lesson.title or f"Lesson {index}"
             description_parts: list[str] = []
-            if lesson.section_number:
-                description_parts.append(self._text(language, "chapter_number_label", number=lesson.section_number))
-            elif lesson.chapter_number:
-                description_parts.append(self._text(language, "chapter_number_label", number=lesson.chapter_number))
+            if lesson.toc_number:
+                description_parts.append(
+                    self._text(
+                        language,
+                        "chapter_number_label",
+                        item_type=self._toc_item_label(lesson, language, title_case=True),
+                        number=lesson.toc_number,
+                    )
+                )
             if lesson.book_title:
                 description_parts.append(lesson.book_title)
             if lesson.display_pages != "Not available":
@@ -1203,6 +1298,7 @@ class ConversationService:
         reply_text = self._text(
             language,
             "lesson_summary_intro",
+            item_type=self._toc_item_label(lesson, language),
             title=lesson.title,
             pages=lesson.display_pages,
             summary=summary,
@@ -2105,6 +2201,10 @@ class ConversationService:
             )
 
         day_number, subsection = selected
+        # Re-resolve the selected day's printed/book page range immediately
+        # before generation. This prevents a raw/stale subsection object from
+        # turning a valid range such as 1-2 into "Not available".
+        subsection = self.embedding_content_repo.hydrate_subsection_book_pages(lesson, subsection)
         lesson_grade = (session.temp_profile_grade or "").strip() or teacher.default_grade
         lesson_subject = (session.temp_profile_subject or "").strip() or teacher.default_subject
         requested_duration = session.temp_duration_minutes or 0
@@ -2133,12 +2233,10 @@ class ConversationService:
         session.temp_lesson_pdf_end_page = subsection.pdf_end_page
         session.temp_lesson_printed_start_page = subsection.printed_start_page
         session.temp_lesson_printed_end_page = subsection.printed_end_page
-        session.temp_customize_from_page = subsection.printed_start_page or (
-            f"PDF {subsection.pdf_start_page}" if subsection.pdf_start_page else None
-        )
-        session.temp_customize_to_page = subsection.printed_end_page or (
-            f"PDF {subsection.pdf_end_page}" if subsection.pdf_end_page else None
-        )
+        # Teacher-facing page state must always use the printed/book label.
+        # Physical PDF coordinates remain internal retrieval metadata only.
+        session.temp_customize_from_page = subsection.printed_start_page
+        session.temp_customize_to_page = subsection.printed_end_page
         session.temp_lesson_is_customized = False
         session.temp_topic = lesson.title
         session.temp_duration_minutes = requested_duration or result.duration_minutes
@@ -2342,11 +2440,11 @@ class ConversationService:
                 return self._generated_lesson_action_reply(
                     session.temp_generated_lesson or "",
                     language,
-                    prefix=self._text(language, "customize_pages_unavailable"),
+                    prefix=self._text(language, "customize_pages_unavailable", item_type=self._toc_item_label(lesson, language)),
                 )
 
             # Start the direct customization sequence. Do not show a second menu:
-            # Customize Lesson -> From Page -> To Page -> regenerate lesson.
+            # Customize Lesson -> From Book Page -> To Book Page -> regenerate lesson.
             session.temp_customize_from_page = None
             session.temp_customize_to_page = None
             session.current_state = ConversationState.NEW_LESSON_CUSTOMIZE_FROM_PAGE.value
@@ -2390,7 +2488,7 @@ class ConversationService:
             return self._generated_lesson_action_reply(
                 session.temp_generated_lesson or "",
                 language,
-                prefix=self._text(language, "customize_pages_unavailable"),
+                prefix=self._text(language, "customize_pages_unavailable", item_type=self._toc_item_label(lesson, language)),
             )
 
         chapter_range = self._chapter_page_range(lesson, pages)
@@ -2398,7 +2496,7 @@ class ConversationService:
             session.current_state = ConversationState.NEW_LESSON_CUSTOMIZE_FROM_PAGE.value
             self.session_repo.save(session)
             return self._reply(
-                self._text(language, "customize_from_prompt", chapter_range=chapter_range),
+                self._text(language, "customize_from_prompt", chapter_range=chapter_range, item_type=self._toc_item_label(lesson, language)),
                 ConversationState.NEW_LESSON_CUSTOMIZE_FROM_PAGE,
             )
 
@@ -2406,7 +2504,7 @@ class ConversationService:
             session.current_state = ConversationState.NEW_LESSON_CUSTOMIZE_TO_PAGE.value
             self.session_repo.save(session)
             return self._reply(
-                self._text(language, "customize_to_prompt", chapter_range=chapter_range),
+                self._text(language, "customize_to_prompt", chapter_range=chapter_range, item_type=self._toc_item_label(lesson, language)),
                 ConversationState.NEW_LESSON_CUSTOMIZE_TO_PAGE,
             )
 
@@ -2477,13 +2575,13 @@ class ConversationService:
             return self._generated_lesson_action_reply(
                 session.temp_generated_lesson or "",
                 language,
-                prefix=self._text(language, "customize_pages_unavailable"),
+                prefix=self._text(language, "customize_pages_unavailable", item_type=self._toc_item_label(lesson, language)),
             )
 
         selected_page = self.embedding_content_repo.resolve_page_choice(pages, text)
         if not selected_page:
             chapter_range = self._chapter_page_range(lesson, pages)
-            prefix = self._text(language, "customize_page_invalid", chapter_range=chapter_range)
+            prefix = self._text(language, "customize_page_invalid", chapter_range=chapter_range, item_type=self._toc_item_label(lesson, language))
             if is_from_page:
                 return self._customize_from_page_prompt_reply(
                     session=session,
@@ -2540,7 +2638,7 @@ class ConversationService:
                 lesson=lesson,
                 pages=pages,
                 language=language,
-                prefix=self._text(language, "customize_page_invalid", chapter_range=chapter_range),
+                prefix=self._text(language, "customize_page_invalid", chapter_range=chapter_range, item_type=self._toc_item_label(lesson, language)),
             )
         if not to_page:
             return self._customize_to_page_prompt_reply(
@@ -2548,7 +2646,7 @@ class ConversationService:
                 lesson=lesson,
                 pages=pages,
                 language=language,
-                prefix=self._text(language, "customize_page_invalid", chapter_range=chapter_range),
+                prefix=self._text(language, "customize_page_invalid", chapter_range=chapter_range, item_type=self._toc_item_label(lesson, language)),
             )
 
         page_indexes = {page.pdf_page_number: index for index, page in enumerate(pages)}

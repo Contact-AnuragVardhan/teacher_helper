@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.logging import get_logger, log_event
 from app.utils.subject_normalization import normalize_subject
+from app.utils.toc_terminology import infer_toc_kind
 
 logger = get_logger(__name__)
 
@@ -49,21 +50,47 @@ class EmbeddingLessonMatch:
     match_score: int = 0
 
     @property
+    def toc_kind(self) -> str:
+        return infer_toc_kind(
+            structure_type=self.structure_type,
+            chapter_title=self.chapter_title,
+            unit_title=self.unit_title,
+            section_title=self.section_title,
+            lesson_title=self.lesson_title,
+        )
+
+    @property
     def title(self) -> str:
-        return (
-            self.section_title
-            or self.lesson_title
-            or self.chapter_title
-            or self.book_title
-            or "Selected lesson"
-        ).strip()
+        if self.toc_kind == "chapter":
+            candidates = (self.chapter_title, self.section_title, self.lesson_title, self.unit_title)
+        elif self.toc_kind == "lesson":
+            candidates = (self.lesson_title, self.section_title, self.chapter_title, self.unit_title)
+        elif self.toc_kind == "section":
+            candidates = (self.section_title, self.lesson_title, self.chapter_title, self.unit_title)
+        elif self.toc_kind == "unit":
+            candidates = (self.unit_title, self.section_title, self.chapter_title, self.lesson_title)
+        else:
+            candidates = (self.section_title, self.lesson_title, self.chapter_title, self.unit_title)
+        return next((str(value).strip() for value in candidates if str(value or "").strip()), self.book_title or "Selected lesson").strip()
+
+    @property
+    def toc_number(self) -> str | None:
+        if self.toc_kind == "chapter":
+            return self.chapter_number or self.section_number or self.unit_number
+        if self.toc_kind == "lesson":
+            return self.section_number or self.chapter_number or self.unit_number
+        if self.toc_kind == "section":
+            return self.section_number or self.chapter_number or self.unit_number
+        if self.toc_kind == "unit":
+            return self.unit_number or self.section_number or self.chapter_number
+        return self.section_number or self.chapter_number or self.unit_number
 
     @property
     def display_pages(self) -> str:
+        # Teacher-facing page references are always printed/book pages. Physical
+        # PDF coordinates remain internal database/retrieval metadata only.
         if self.printed_start_page and self.printed_end_page:
             return f"{self.printed_start_page}-{self.printed_end_page}"
-        if self.pdf_start_page and self.pdf_end_page:
-            return f"PDF {self.pdf_start_page}-{self.pdf_end_page}"
         return "Not available"
 
 
@@ -94,9 +121,17 @@ class EmbeddingSubsection:
     @property
     def display_pages(self) -> str:
         if self.printed_start_page and self.printed_end_page:
+            if str(self.printed_start_page) == str(self.printed_end_page):
+                return str(self.printed_start_page)
             return f"{self.printed_start_page}-{self.printed_end_page}"
-        if self.pdf_start_page and self.pdf_end_page:
-            return f"PDF {self.pdf_start_page}-{self.pdf_end_page}"
+
+        # Older/incompletely migrated embeddings rows may have the printed
+        # page list even when the explicit printed start/end columns are null.
+        labels = [str(value).strip() for value in self.printed_page_numbers if str(value).strip()]
+        if labels:
+            if labels[0] == labels[-1]:
+                return labels[0]
+            return f"{labels[0]}-{labels[-1]}"
         return "Not available"
 
 
@@ -111,12 +146,14 @@ class EmbeddingPageExtraction:
     quality_flags: list[str] | None = None
 
     @property
+    def book_page_label(self) -> str | None:
+        value = (self.printed_page_number or "").strip() or (self.printed_page_label or "").strip()
+        return value or None
+
+    @property
     def display_page(self) -> str:
-        return (
-            (self.printed_page_number or "").strip()
-            or (self.printed_page_label or "").strip()
-            or f"PDF {self.pdf_page_number}"
-        )
+        # Never expose the physical PDF coordinate to the teacher.
+        return self.book_page_label or "Not available"
 
 
 class EmbeddingContentRepository:
@@ -337,7 +374,9 @@ class EmbeddingContentRepository:
             self.db.rollback()
             return []
 
-        return [self._subsection_from_row(row) for row in rows]
+        subsections = [self._subsection_from_row(row) for row in rows]
+        self._hydrate_subsection_book_pages(lesson, subsections)
+        return subsections
 
     def get_subsection_by_id(self, subsection_id: str) -> EmbeddingSubsection | None:
         if not subsection_id:
@@ -376,7 +415,15 @@ class EmbeddingContentRepository:
             log_event(logger, "embedding_subsection_lookup_failed", error=str(exc), subsection_id=subsection_id)
             self.db.rollback()
             return None
-        return self._subsection_from_row(row) if row else None
+        if not row:
+            return None
+        subsection = self._subsection_from_row(row)
+        # A selected day is often reloaded by id after the day menu. Older
+        # ingestion rows may have null printed_start/end and no printed page
+        # list even though page_extractions has the correct book-page labels.
+        # Hydrate here as well so the selected object cannot lose the range.
+        self._hydrate_single_subsection_book_pages(subsection)
+        return subsection
 
     def list_pages_for_lesson(self, lesson: EmbeddingLessonMatch) -> list[EmbeddingPageExtraction]:
         """Return every physical page inside the selected chapter/section range.
@@ -458,24 +505,194 @@ class EmbeddingContentRepository:
         )
         return pages
 
+    def _hydrate_subsection_book_pages(
+        self,
+        lesson: EmbeddingLessonMatch,
+        subsections: list[EmbeddingSubsection],
+    ) -> None:
+        """Fill missing day book-page bounds without exposing PDF page numbers.
+
+        Source priority is deliberately teacher-facing only:
+        1. explicit subsection printed_start_page / printed_end_page
+        2. subsection printed_page_numbers
+        3. printed labels from embeddings_page_extractions inside the
+           subsection's internal PDF range
+
+        Physical PDF page numbers are used only to locate the page-extraction
+        rows; they are never substituted as book-page labels.
+        """
+        missing = [
+            subsection
+            for subsection in subsections
+            if not subsection.printed_start_page or not subsection.printed_end_page
+        ]
+        if not missing:
+            return
+
+        # First recover from the subsection row itself when the importer stored
+        # the list but omitted the explicit start/end columns.
+        unresolved: list[EmbeddingSubsection] = []
+        for subsection in missing:
+            labels = [
+                str(value).strip()
+                for value in subsection.printed_page_numbers
+                if str(value).strip()
+            ]
+            if labels:
+                subsection.printed_start_page = subsection.printed_start_page or labels[0]
+                subsection.printed_end_page = subsection.printed_end_page or labels[-1]
+            if not subsection.printed_start_page or not subsection.printed_end_page:
+                unresolved.append(subsection)
+
+        if not unresolved:
+            return
+
+        # Then recover from page-level extraction metadata. Fetch once for the
+        # selected TOC item and map each day by its internal PDF bounds.
+        pages = self.list_pages_for_lesson(lesson)
+        if pages:
+            for subsection in unresolved:
+                if subsection.pdf_start_page is None or subsection.pdf_end_page is None:
+                    continue
+                labels = [
+                    page.book_page_label
+                    for page in pages
+                    if subsection.pdf_start_page <= page.pdf_page_number <= subsection.pdf_end_page
+                    and page.book_page_label
+                ]
+                if not labels:
+                    continue
+                subsection.printed_start_page = subsection.printed_start_page or labels[0]
+                subsection.printed_end_page = subsection.printed_end_page or labels[-1]
+                if not subsection.printed_page_numbers:
+                    subsection.printed_page_numbers = labels
+
+        # Some older/live chapter rows do not carry parent PDF bounds even
+        # though every subsection/day does.  In that case list_pages_for_lesson
+        # cannot perform the batch lookup.  Resolve each still-missing day by
+        # its own internal PDF bounds, exactly like the selected-day path.
+        # This affects only internal retrieval; teacher-facing values remain
+        # printed/book-page labels.
+        for subsection in unresolved:
+            if not subsection.printed_start_page or not subsection.printed_end_page:
+                self._hydrate_single_subsection_book_pages(subsection)
+
+
+    def hydrate_subsection_book_pages(
+        self,
+        lesson: EmbeddingLessonMatch,
+        subsection: EmbeddingSubsection,
+    ) -> EmbeddingSubsection:
+        """Public guard used immediately before day lesson generation.
+
+        This deliberately re-resolves the selected day's printed/book range
+        even if the list screen previously hydrated it. It protects against
+        stale/raw subsection objects and older DB rows.
+        """
+        self._hydrate_subsection_book_pages(lesson, [subsection])
+        if not subsection.printed_start_page or not subsection.printed_end_page:
+            self._hydrate_single_subsection_book_pages(subsection)
+        return subsection
+
+    def _hydrate_single_subsection_book_pages(
+        self,
+        subsection: EmbeddingSubsection,
+    ) -> None:
+        """Recover a single day's book-page bounds directly from page metadata."""
+        if subsection.printed_start_page and subsection.printed_end_page:
+            return
+
+        labels = [
+            str(value).strip()
+            for value in subsection.printed_page_numbers
+            if str(value).strip()
+        ]
+        if labels:
+            subsection.printed_start_page = subsection.printed_start_page or labels[0]
+            subsection.printed_end_page = subsection.printed_end_page or labels[-1]
+            if subsection.printed_start_page and subsection.printed_end_page:
+                return
+
+        if (
+            not subsection.document_id
+            or subsection.pdf_start_page is None
+            or subsection.pdf_end_page is None
+        ):
+            return
+
+        document_expr = (
+            "CAST(:document_id AS uuid)"
+            if not self.settings.database_is_sqlite
+            else ":document_id"
+        )
+        sql = text(
+            f"""
+            SELECT
+                pe.pdf_page_number,
+                pe.printed_page_number,
+                pe.printed_page_label
+            FROM {self._schema_prefix}embeddings_page_extractions pe
+            WHERE pe.document_id = {document_expr}
+              AND pe.pdf_page_number BETWEEN :pdf_start_page AND :pdf_end_page
+            ORDER BY pe.pdf_page_number
+            """
+        )
+        try:
+            rows = self.db.execute(
+                sql,
+                {
+                    "document_id": subsection.document_id,
+                    "pdf_start_page": subsection.pdf_start_page,
+                    "pdf_end_page": subsection.pdf_end_page,
+                },
+            ).mappings().all()
+        except SQLAlchemyError as exc:
+            log_event(
+                logger,
+                "embedding_subsection_book_pages_lookup_failed",
+                error=str(exc),
+                subsection_id=subsection.id,
+                document_id=subsection.document_id,
+            )
+            self.db.rollback()
+            return
+
+        page_labels: list[str] = []
+        for row in rows:
+            raw_number = row.get("printed_page_number")
+            raw_label = row.get("printed_page_label")
+            label = str(raw_number).strip() if raw_number is not None else ""
+            if not label and raw_label is not None:
+                label = str(raw_label).strip()
+            if label:
+                page_labels.append(label)
+
+        if not page_labels:
+            return
+
+        subsection.printed_start_page = subsection.printed_start_page or page_labels[0]
+        subsection.printed_end_page = subsection.printed_end_page or page_labels[-1]
+        if not subsection.printed_page_numbers:
+            subsection.printed_page_numbers = page_labels
+
     def resolve_page_choice(
         self,
         pages: list[EmbeddingPageExtraction],
         value: str | None,
     ) -> EmbeddingPageExtraction | None:
-        """Resolve an exact printed-page label or physical PDF page number."""
+        """Resolve an exact printed/book-page label only.
+
+        Physical PDF page numbers are intentionally not accepted from teacher
+        input. They remain internal coordinates used to retrieve and validate a
+        contiguous source slice.
+        """
         raw = (value or "").strip()
         if not raw:
             return None
         normalized = raw.casefold().strip()
         normalized = re.sub(r"^(?:book\s*)?page\s*[:#-]?\s*", "", normalized)
-        explicit_pdf = normalized.startswith("pdf")
-        if explicit_pdf:
-            normalized = re.sub(r"^pdf\s*[:#-]?\s*", "", normalized).strip()
-
-        if explicit_pdf and normalized.isdigit():
-            pdf_page = int(normalized)
-            return next((page for page in pages if page.pdf_page_number == pdf_page), None)
+        if normalized.startswith("pdf"):
+            return None
 
         for page in pages:
             labels = {
@@ -485,12 +702,6 @@ class EmbeddingContentRepository:
             labels.discard("")
             if normalized in labels:
                 return page
-
-        # Numeric input is normally a printed page. If the book has no matching
-        # printed number, accept the physical PDF page as a practical fallback.
-        if normalized.isdigit():
-            pdf_page = int(normalized)
-            return next((page for page in pages if page.pdf_page_number == pdf_page), None)
         return None
 
     def _candidate_lessons(
@@ -602,6 +813,14 @@ class EmbeddingContentRepository:
         )
 
     def _subsection_from_row(self, row) -> EmbeddingSubsection:
+        printed_page_numbers = self._as_list(row.get("printed_page_numbers"))
+        printed_labels = [str(value).strip() for value in printed_page_numbers if str(value).strip()]
+        printed_start_page = row.get("printed_start_page")
+        printed_end_page = row.get("printed_end_page")
+        if printed_labels:
+            printed_start_page = printed_start_page or printed_labels[0]
+            printed_end_page = printed_end_page or printed_labels[-1]
+
         return EmbeddingSubsection(
             id=str(row.get("id") or ""),
             document_id=str(row.get("document_id") or ""),
@@ -610,10 +829,10 @@ class EmbeddingContentRepository:
             anchor_marker=row.get("anchor_marker"),
             pdf_start_page=row.get("pdf_start_page"),
             pdf_end_page=row.get("pdf_end_page"),
-            printed_start_page=row.get("printed_start_page"),
-            printed_end_page=row.get("printed_end_page"),
+            printed_start_page=(str(printed_start_page).strip() if printed_start_page is not None else None),
+            printed_end_page=(str(printed_end_page).strip() if printed_end_page is not None else None),
             page_numbers=self._as_list(row.get("page_numbers")),
-            printed_page_numbers=self._as_list(row.get("printed_page_numbers")),
+            printed_page_numbers=printed_page_numbers,
             includes=self._as_list(row.get("includes")),
             text=row.get("text") or "",
             text_length_chars=row.get("text_length_chars"),

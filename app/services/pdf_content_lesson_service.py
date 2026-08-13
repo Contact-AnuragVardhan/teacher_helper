@@ -15,6 +15,7 @@ from app.services.lesson_generation_provider import PromptBundle
 from app.services.output_normalizer import normalize_lesson_output
 from app.services.whatsapp_formatter import format_whatsapp_lesson
 from app.utils.subject_normalization import normalize_subject, subject_display_name
+from app.utils.toc_terminology import toc_label
 
 logger = get_logger(__name__)
 
@@ -360,19 +361,19 @@ class PdfContentLessonService:
         key = language_key(preferred_language)
         if key == "hindi":
             return (
-                "Textbook source content may be in another language. Preserve book titles, chapter titles, names, formulas, "
+                "Textbook source content may be in another language. Preserve book titles, TOC item titles, names, formulas, "
                 "quoted textbook terms, and exact source identifiers as supplied when you need to reference them. "
                 "Do not translate or rewrite the supplied source text itself. All newly generated explanations, bullets, labels, "
                 "and section headings must follow the Hindi/Devanagari output rule."
             )
         if key == "hinglish":
             return (
-                "Textbook source content may be in another script or language. Preserve book titles, chapter titles, names, formulas, "
+                "Textbook source content may be in another script or language. Preserve book titles, TOC item titles, names, formulas, "
                 "quoted textbook terms, and exact source identifiers as supplied when referenced. Do not transliterate or translate the source text itself. "
                 "All newly generated explanations and bullets must be simple Roman-script Hinglish."
             )
         return (
-            "Preserve book titles, chapter titles, names, formulas, quoted textbook terms, and exact source identifiers as supplied. "
+            "Preserve book titles, TOC item titles, names, formulas, quoted textbook terms, and exact source identifiers as supplied. "
             "Do not translate or rewrite the supplied source text itself; write newly generated explanations in English."
         )
 
@@ -384,13 +385,14 @@ class PdfContentLessonService:
             return "Selected textbook"
         return "Selected textbook"
 
-    def _day_output_labels(self, preferred_language: str, day_number: int) -> dict[str, str]:
+    def _day_output_labels(self, preferred_language: str, day_number: int, toc_kind: str = "chapter") -> dict[str, str]:
         key = language_key(preferred_language)
+        source_label = toc_label(toc_kind, preferred_language)
         if key == "hindi":
             return {
                 "day_title": f"दिन {day_number}",
                 "lesson_title": f"📚 दिन {day_number} पाठ (विस्तृत)",
-                "chapter": "अध्याय",
+                "chapter": source_label,
                 "book": "पुस्तक",
                 "book_pages": "पुस्तक पृष्ठ",
                 "grade": "ग्रेड/कक्षा",
@@ -416,7 +418,7 @@ class PdfContentLessonService:
         return {
             "day_title": f"Day {day_number}",
             "lesson_title": f"📚 Day {day_number} Lesson (Detailed)",
-            "chapter": "Chapter",
+            "chapter": source_label,
             "book": "Book",
             "book_pages": "Book Pages",
             "grade": "Grade",
@@ -456,23 +458,24 @@ class PdfContentLessonService:
         )
         language_instruction = generation_language_instruction(active_language, preserve_source_text=True)
         source_instruction = self._source_preservation_instruction(active_language)
+        item_label = toc_label(lesson.toc_kind, active_language)
         system_prompt = (
             "You are a helpful teaching assistant for resource-limited classrooms. "
-            "You summarize exact textbook chapter content for a teacher before they choose a day. "
+            "You summarize the exact selected textbook TOC item for a teacher before they choose a day. "
             f"{language_instruction} {source_instruction}"
         )
         user_prompt = (
-            "Generate a simple chapter summary for the teacher.\n\n"
+            "Generate a simple summary of the selected textbook TOC item for the teacher.\n\n"
             f"Preferred Language: {active_language}\n"
             f"School: {getattr(teacher, 'school_name', '') or lesson.school_name or ''}\n"
             f"Grade: {grade_value}\n"
             f"Subject: {subject_value}\n"
             f"Class Duration: {duration_minutes or 0} minutes\n"
             f"Book: {lesson.book_title or ''}\n"
-            f"Chapter: {lesson.title}\n"
+            f"{item_label}: {lesson.title}\n"
             f"Book pages: {lesson.display_pages}\n\n"
             "Rules:\n"
-            "- Use ONLY the supplied chapter content.\n"
+            "- Use ONLY the supplied selected TOC-item content.\n"
             f"- {language_instruction}\n"
             f"- {source_instruction}\n"
             "- Keep it WhatsApp friendly.\n"
@@ -481,9 +484,9 @@ class PdfContentLessonService:
             "- Mention the main idea, important vocabulary/concepts, and what students will practice.\n"
             "- Do not add a heading, preface, source block, or closing note; return only the bullets.\n"
             "- No markdown tables. No HTML. No LaTeX.\n\n"
-            "--- CHAPTER CONTENT START ---\n"
+            "--- SELECTED BOOK TOC ITEM CONTENT START ---\n"
             f"{lesson_text}\n"
-            "--- CHAPTER CONTENT END ---"
+            "--- SELECTED BOOK TOC ITEM CONTENT END ---"
         )
         return PromptBundle(
             system_prompt=system_prompt,
@@ -510,7 +513,7 @@ class PdfContentLessonService:
         preferred_language: str | None = None,
     ) -> PromptBundle:
         active_language = self._resolve_language(preferred_language, teacher)
-        labels = self._day_output_labels(active_language, day_number)
+        labels = self._day_output_labels(active_language, day_number, lesson.toc_kind)
         subject_normalized = normalize_subject(subject or lesson.subject or teacher.default_subject)
         subject_display = subject_display_name(subject_normalized, language=active_language)
         grade_value = grade or lesson.grade or lesson.class_name or teacher.default_grade
@@ -540,10 +543,10 @@ class PdfContentLessonService:
             f"OUTPUT LANGUAGE RULE: {language_instruction}\n"
             f"SOURCE PRESERVATION RULE: {source_instruction}\n\n"
             "Use ONLY the supplied DAY content.\n"
-            "Do NOT use other chapter content.\n"
+            "Do NOT use other book content.\n"
             "Do NOT use content from previous days.\n"
             "Do NOT use content from later days.\n"
-            "Do NOT generate a chapter summary.\n"
+            "Do NOT generate a multi-part book summary.\n"
             "Do NOT generate a multi-day plan.\n\n"
             "Base the lesson only on:\n"
             "- supplied DAY content\n"
@@ -663,30 +666,31 @@ class PdfContentLessonService:
             preview += "..."
         lang = language_key(language)
         subsection_count = int(lesson.subsection_count or 0)
+        item_label = toc_label(lesson.toc_kind, language)
         if lang == "hindi":
-            excerpt = preview or "उपलब्ध अध्याय पाठ खाली है।"
+            excerpt = preview or "चुने हुए पुस्तक भाग का पाठ उपलब्ध नहीं है।"
             return (
-                f"- यह सारांश उपलब्ध अध्याय सामग्री पर आधारित है।\n"
-                f"- अध्याय: {lesson.title}\n"
+                f"- यह सारांश चुनी हुई पुस्तक सामग्री पर आधारित है।\n"
+                f"- {item_label}: {lesson.title}\n"
                 f"- पुस्तक पृष्ठ: {lesson.display_pages}\n"
-                f"- इस अध्याय में {subsection_count} दिन/उपखंड उपलब्ध हैं।\n"
+                f"- इस चुने हुए भाग में {subsection_count} दिन/उपखंड उपलब्ध हैं।\n"
                 f"- मूल पाठ का छोटा अंश: {excerpt}"
             )
         if lang == "hinglish":
-            excerpt = preview or "Available chapter text empty hai."
+            excerpt = preview or "Selected book content empty hai."
             return (
-                f"- Yeh summary available chapter content par based hai.\n"
-                f"- Chapter: {lesson.title}\n"
+                f"- Yeh summary selected book content par based hai.\n"
+                f"- {item_label}: {lesson.title}\n"
                 f"- Book Pages: {lesson.display_pages}\n"
-                f"- Is chapter mein {subsection_count} day/subsection available hain.\n"
+                f"- Is selected item mein {subsection_count} day/subsection available hain.\n"
                 f"- Original textbook ka short excerpt: {excerpt}"
             )
-        excerpt = preview or "The available chapter text is empty."
+        excerpt = preview or "The selected book content is empty."
         return (
-            f"- This summary is based on the available chapter content.\n"
-            f"- Chapter: {lesson.title}\n"
+            f"- This summary is based on the selected book content.\n"
+            f"- {item_label}: {lesson.title}\n"
             f"- Book Pages: {lesson.display_pages}\n"
-            f"- This chapter has {subsection_count} available day/subsection entries.\n"
+            f"- This selected item has {subsection_count} available day/subsection entries.\n"
             f"- Short excerpt from the original textbook: {excerpt}"
         )
 
@@ -703,7 +707,7 @@ class PdfContentLessonService:
         preferred_language: str | None = None,
     ) -> str:
         active_language = self._resolve_language(preferred_language, teacher)
-        labels = self._day_output_labels(active_language, day_number)
+        labels = self._day_output_labels(active_language, day_number, lesson.toc_kind)
         subject_display = subject_display_name(
             normalize_subject(subject or lesson.subject or teacher.default_subject),
             language=active_language,
@@ -845,7 +849,7 @@ class PdfContentLessonService:
     ) -> str:
         """Ensure the visible lesson starts with profile-language metadata."""
         active_language = self._resolve_language(preferred_language, teacher)
-        labels = self._day_output_labels(active_language, day_number)
+        labels = self._day_output_labels(active_language, day_number, lesson.toc_kind)
         subject_display = subject_display_name(
             normalize_subject(subject or lesson.subject or teacher.default_subject),
             language=active_language,

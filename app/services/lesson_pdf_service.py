@@ -43,6 +43,8 @@ class LessonPdfMetadata:
     book_title: str = ""
     chapter_title: str = ""
     section_title: str = ""
+    content_type_label: str = ""
+    content_title: str = ""
     day_title: str = ""
     pages: str = ""
     is_customized: bool = False
@@ -86,6 +88,8 @@ class LessonPdfService:
                 metadata.book_title,
                 metadata.chapter_title,
                 metadata.section_title,
+                metadata.content_type_label,
+                metadata.content_title,
                 metadata.day_title,
                 *labels.values(),
             ]
@@ -388,6 +392,19 @@ class LessonPdfService:
             f"{metadata.duration_minutes} {labels['minutes']}" if metadata.duration_minutes else ""
         )
         day_value = self._localized_day_value(metadata.day_title, metadata.preferred_language)
+        source_rows = []
+        if metadata.content_title:
+            source_rows.append((metadata.content_type_label or labels["chapter"], metadata.content_title))
+        else:
+            # Backward compatibility for older callers that have not yet supplied
+            # the TOC-derived source type/title.
+            source_rows.extend(
+                [
+                    (labels["chapter"], metadata.chapter_title or metadata.section_title),
+                    (labels["section"], metadata.section_title if metadata.section_title != metadata.chapter_title else ""),
+                ]
+            )
+
         rows = [
             (labels["teacher"], metadata.teacher_name),
             (labels["school"], metadata.school_name),
@@ -395,8 +412,7 @@ class LessonPdfService:
             (labels["subject"], metadata.subject),
             (labels["duration"], duration_value),
             (labels["book"], metadata.book_title),
-            (labels["chapter"], metadata.chapter_title or metadata.section_title),
-            (labels["section"], metadata.section_title if metadata.section_title != metadata.chapter_title else ""),
+            *source_rows,
             (labels["day"], day_value),
             (labels["book_pages"], metadata.pages),
             (labels["lesson_type"], labels["customized"] if metadata.is_customized else labels["generated"]),

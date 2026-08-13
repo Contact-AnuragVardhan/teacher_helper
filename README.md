@@ -217,31 +217,38 @@ The direct customization sequence is:
 
 ```text
 Customize Lesson
-→ Ask From Page
-→ Ask To Page
+→ Ask From Book Page
+→ Ask To Book Page
 → Validate the contiguous chapter range
 → Retrieve only those book pages
 → Regenerate the lesson automatically
 → Show Use this lesson / Customize Lesson / Print Lesson again
 ```
 
-The From Page prompt displays the current lesson page range and the complete selected chapter range. After a valid From Page is entered, Teacher Helper asks for To Page. Entering a valid To Page immediately regenerates the lesson; there is no additional Create/Save menu selection.
+The From Book Page prompt displays the current lesson book-page range and the complete selected TOC item's book-page range. After a valid From Book Page is entered, Teacher Helper asks for To Book Page. Entering a valid To Book Page immediately regenerates the lesson; there is no additional Create/Save menu selection.
 
-Inputs are treated as printed book-page values first, including compound labels such as `2/4`. An explicit physical page can be entered as `PDF 21`.
+Teacher-facing page input and output use printed **book pages only**, including compound labels such as `2/4`. Physical PDF page numbers are internal retrieval coordinates only: inputs such as `PDF 21` are intentionally rejected, and numeric input never falls back to a physical PDF page.
 
-Page customization reads only from `embeddings_page_extractions`. The selected pages must:
+Page customization reads only from `embeddings_page_extractions`. The selected book pages must:
 
-- exist inside the selected chapter's physical PDF range;
-- form an inclusive, contiguous physical page sequence; and
+- belong to the selected TOC item;
+- map to an inclusive, contiguous source-page sequence internally; and
 - contain usable extracted text.
 
-After regeneration, **Use this lesson** continues through the existing save and lesson-name flow. Customized lesson names automatically receive a trailing `*`, and saved source metadata records `source_type=pdf_to_embeddings_page_range`, the selected page range, and `is_customized=true`.
+After regeneration, **Use this lesson** continues through the existing save and lesson-name flow. Customized lesson names automatically receive a trailing `*`, and saved source metadata records `source_type=pdf_to_embeddings_page_range`, the selected book-page range, and `is_customized=true`.
 
 Existing profile, language, lesson-list, save/cancel, share, delete, post-generation action, and Main Menu behavior remains available.
 
+
+## TOC terminology and greeting-to-home behavior
+
+Teacher Helper no longer assumes that every row in `embeddings_book_chapters` is a user-facing chapter. It derives the displayed TOC type from `structure_type` and the source fields: chapters/prose are shown as **Chapter**, poems/poetry/lessons as **Lesson**, and section/unit/topic records keep their own terminology. Generic selection screens say **Book TOC** so mixed books do not promote lessons or poems to chapters.
+
+`Hi`, `Hello`, `Namaste`, `Namaskar`, `Pranam`, common variants such as `Hii`, and greeting-led messages such as `Hello teacher` are global home commands. They reset the active conversation flow and return the teacher to the Main Menu from any state.
+
 ## Print Lesson PDF export
 
-Selecting **Print Lesson** exports the currently generated lesson, including a customized lesson, without requiring the teacher to save it first. The PDF contains teacher, school, grade, subject, duration, book, chapter/section, day, selected book-page range, customization status, the full lesson plan, and page numbers.
+Selecting **Print Lesson** exports the currently generated lesson, including a customized lesson, without requiring the teacher to save it first. The PDF contains teacher, school, grade, subject, duration, book, TOC item type/title, day, selected book-page range, customization status, the full lesson plan, and page numbers.
 
 Delivery uses the WhatsApp Cloud API in two steps:
 
