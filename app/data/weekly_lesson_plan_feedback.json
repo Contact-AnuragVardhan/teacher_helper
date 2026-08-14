@@ -1,0 +1,89 @@
+{
+  "survey_id": "weekly_lesson_plan_feedback",
+  "version": 1,
+  "title": "Weekly Lesson Plan Feedback",
+  "description": "Please answer the following questions about this week's Lesson Plans.",
+  "choice_answer_format": "Yes / Sometimes / No",
+  "choice_options": [
+    {"id": "yes", "label": "Yes"},
+    {"id": "sometimes", "label": "Sometimes"},
+    {"id": "no", "label": "No"}
+  ],
+  "parts": [
+    {
+      "id": "part_a",
+      "title": "Part A – Quick Questions",
+      "questions": [
+        {
+          "id": "q1",
+          "number": 1,
+          "type": "choice",
+          "text": "Did you complete the 20-minute Lesson Plan Review on most school days this week?",
+          "required": true
+        },
+        {
+          "id": "q2",
+          "number": 2,
+          "type": "choice",
+          "text": "Did the Lesson Plan help you prepare your class better?",
+          "required": true
+        },
+        {
+          "id": "q3",
+          "number": 3,
+          "type": "choice",
+          "text": "Was the Lesson Plan correct, for your lesson for the day ?",
+          "required": true
+        },
+        {
+          "id": "q4",
+          "number": 4,
+          "type": "choice",
+          "text": "Did the Lesson Plan save you preparation time?",
+          "required": true
+        },
+        {
+          "id": "q5",
+          "number": 5,
+          "type": "choice",
+          "text": "Was the Lesson Plan easy to understand?",
+          "required": true
+        },
+        {
+          "id": "q6",
+          "number": 6,
+          "type": "choice",
+          "text": "Did you use most of the suggested activities or questions in class?",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "part_b",
+      "title": "Part B – Short Answers",
+      "questions": [
+        {
+          "id": "q7",
+          "number": 7,
+          "type": "text",
+          "text": "What was the MOST useful part of this week's Lesson Plans?",
+          "required": true
+        },
+        {
+          "id": "q8",
+          "number": 8,
+          "type": "text",
+          "text": "What was the BIGGEST problem you faced using the Lesson Plans?",
+          "required": true
+        },
+        {
+          "id": "q10",
+          "number": 10,
+          "type": "text",
+          "text": "If you could change ONE thing, what would it be?",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

@@ -28,6 +28,14 @@ def create_teacher(db_session):
     return teacher
 
 
+def test_feedback_survey_runtime_asset_is_present():
+    service = FeedbackSurveyService()
+    assert service.survey_path.is_file(), (
+        "Feedback survey runtime asset is missing. "
+        "app/data/weekly_lesson_plan_feedback.json must be committed/deployed."
+    )
+
+
 def test_feedback_json_schema_and_question_numbering():
     survey = FeedbackSurveyService().load()
     questions = survey.flattened_questions()

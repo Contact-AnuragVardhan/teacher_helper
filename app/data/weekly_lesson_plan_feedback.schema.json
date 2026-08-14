@@ -1,0 +1,156 @@
+{
+  "$defs": {
+    "FeedbackChoiceOption": {
+      "properties": {
+        "id": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "label": {
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Label",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "label"
+      ],
+      "title": "FeedbackChoiceOption",
+      "type": "object"
+    },
+    "FeedbackPart": {
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "maxLength": 255,
+          "minLength": 1,
+          "title": "Title",
+          "type": "string"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/$defs/FeedbackQuestion"
+          },
+          "minItems": 1,
+          "title": "Questions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "questions"
+      ],
+      "title": "FeedbackPart",
+      "type": "object"
+    },
+    "FeedbackQuestion": {
+      "properties": {
+        "id": {
+          "maxLength": 80,
+          "minLength": 1,
+          "title": "Id",
+          "type": "string"
+        },
+        "number": {
+          "minimum": 1,
+          "title": "Number",
+          "type": "integer"
+        },
+        "type": {
+          "enum": [
+            "choice",
+            "text"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "text": {
+          "maxLength": 2000,
+          "minLength": 1,
+          "title": "Text",
+          "type": "string"
+        },
+        "required": {
+          "default": true,
+          "title": "Required",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "number",
+        "type",
+        "text"
+      ],
+      "title": "FeedbackQuestion",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "survey_id": {
+      "maxLength": 100,
+      "minLength": 1,
+      "title": "Survey Id",
+      "type": "string"
+    },
+    "version": {
+      "minimum": 1,
+      "title": "Version",
+      "type": "integer"
+    },
+    "title": {
+      "maxLength": 255,
+      "minLength": 1,
+      "title": "Title",
+      "type": "string"
+    },
+    "description": {
+      "default": "",
+      "maxLength": 2000,
+      "title": "Description",
+      "type": "string"
+    },
+    "choice_answer_format": {
+      "default": "Yes / Sometimes / No",
+      "maxLength": 100,
+      "title": "Choice Answer Format",
+      "type": "string"
+    },
+    "choice_options": {
+      "items": {
+        "$ref": "#/$defs/FeedbackChoiceOption"
+      },
+      "maxItems": 3,
+      "minItems": 1,
+      "title": "Choice Options",
+      "type": "array"
+    },
+    "parts": {
+      "items": {
+        "$ref": "#/$defs/FeedbackPart"
+      },
+      "minItems": 1,
+      "title": "Parts",
+      "type": "array"
+    }
+  },
+  "required": [
+    "survey_id",
+    "version",
+    "title",
+    "choice_options",
+    "parts"
+  ],
+  "title": "FeedbackSurveyDefinition",
+  "type": "object"
+}

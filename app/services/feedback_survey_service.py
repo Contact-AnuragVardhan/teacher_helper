@@ -17,6 +17,12 @@ class FeedbackSurveyService:
 
     def load(self) -> FeedbackSurveyDefinition:
         try:
+            if not self.survey_path.is_file():
+                raise FileNotFoundError(
+                    "Feedback survey definition is missing at "
+                    f"{self.survey_path}. Ensure app/data/weekly_lesson_plan_feedback.json "
+                    "is committed and included in the deployed application."
+                )
             payload = json.loads(self.survey_path.read_text(encoding="utf-8"))
             survey = FeedbackSurveyDefinition.model_validate(payload)
         except Exception as exc:
