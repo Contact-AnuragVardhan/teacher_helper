@@ -35,4 +35,6 @@ teacher_helper.db
 
 Thumbs.db
 Desktop.ini
-data
+# Ignore only a repository-root data directory.
+# Do not ignore app/data, which contains runtime application assets such as the feedback survey.
+/data/
