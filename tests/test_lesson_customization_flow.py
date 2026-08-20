@@ -422,6 +422,7 @@ def test_greeting_from_any_active_state_returns_to_main_menu(db_session):
         "menu_all_lessons",
         "menu_my_profile",
         "menu_feedback",
+        "menu_admin",
     ]
 
 

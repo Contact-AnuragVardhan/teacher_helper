@@ -110,6 +110,12 @@ class SessionRepository:
         log_event(logger, "session_clear_temp_feedback", whatsapp_number=session.whatsapp_number)
         return self.save(session)
 
+    def clear_temp_admin(self, session: SessionState) -> SessionState:
+        session.temp_admin_report_type = None
+        session.temp_admin_teacher_id = None
+        log_event(logger, "session_clear_temp_admin", whatsapp_number=session.whatsapp_number)
+        return self.save(session)
+
     def reset_for_main_menu(self, session: SessionState) -> SessionState:
         session.current_state = ConversationState.MAIN_MENU.value
         session.temp_topic = None
@@ -147,6 +153,8 @@ class SessionRepository:
         session.temp_feedback_survey_key = None
         session.temp_feedback_question_index = None
         session.temp_feedback_answers_json = None
+        session.temp_admin_report_type = None
+        session.temp_admin_teacher_id = None
         session.updated_at = datetime.utcnow()
         log_event(logger, "session_reset_main_menu", whatsapp_number=session.whatsapp_number)
         return self.save(session)

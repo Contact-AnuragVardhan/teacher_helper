@@ -61,6 +61,7 @@ def test_main_menu_uses_list_and_includes_feedback(client, db_session):
         "menu_all_lessons",
         "menu_my_profile",
         "menu_feedback",
+        "menu_admin",
     ]
 
 

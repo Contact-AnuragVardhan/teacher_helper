@@ -1,7 +1,8 @@
 from dataclasses import dataclass, replace
 import base64
+import hmac
 import json
-from datetime import datetime
+from datetime import date, datetime, timedelta, timezone
 import re
 
 from sqlalchemy.orm import Session
@@ -9,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.core.config import get_settings
 from app.core.language import DEFAULT_LANGUAGE, language_key, normalize_language
 from app.core.logging import get_logger, log_event
+from app.repositories.admin_repository import AdminRepository
 from app.repositories.embedding_content_repository import (
     EmbeddingContentRepository,
     EmbeddingLessonMatch,
@@ -57,6 +59,7 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_all_lessons": "सभी पाठ",
         "btn_profile": "प्रोफ़ाइल",
         "btn_feedback": "फीडबैक",
+        "btn_admin": "ADMIN",
         "main_menu_button": "मेनू",
         "main_menu_section": "Teacher Helper",
         "feedback_intro": "कृपया इस सप्ताह की Lesson Plans के बारे में छोटा फीडबैक दें। अंतिम जवाब के बाद आपके जवाब सेव हो जाएंगे।",
@@ -217,6 +220,7 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_all_lessons": "All Lessons",
         "btn_profile": "My Profile",
         "btn_feedback": "Feedback",
+        "btn_admin": "ADMIN",
         "main_menu_button": "Menu",
         "main_menu_section": "Teacher Helper",
         "feedback_intro": "Please answer this short weekly Lesson Plan feedback. Your answers will be saved after the final question.",
@@ -377,6 +381,7 @@ TEXT: dict[str, dict[str, str]] = {
         "btn_all_lessons": "All Lessons",
         "btn_profile": "Profile",
         "btn_feedback": "Feedback",
+        "btn_admin": "ADMIN",
         "main_menu_button": "Menu",
         "main_menu_section": "Teacher Helper",
         "feedback_intro": "Please is week ke Lesson Plans par short feedback dein. Final answer ke baad aapke answers save ho jayenge.",
@@ -534,6 +539,7 @@ class ConversationService:
         self.db = db
         self.settings = get_settings()
         self.teacher_repo = TeacherRepository(db)
+        self.admin_repo = AdminRepository(db)
         self.feedback_repo = FeedbackRepository(db)
         self.lesson_repo = LessonRepository(db)
         self.embedding_content_repo = EmbeddingContentRepository(db)
@@ -557,6 +563,24 @@ class ConversationService:
         log_event(logger, "conversation_inbound", whatsapp_number=whatsapp_number, state=state.value, body=text)
 
         choice = normalize_choice(text)
+
+        admin_states = {
+            ConversationState.ADMIN_PASSWORD,
+            ConversationState.ADMIN_MENU,
+            ConversationState.ADMIN_SELECT_TEACHER,
+            ConversationState.ADMIN_SELECT_WEEK,
+        }
+        entering_admin = state == ConversationState.MAIN_MENU and choice in {
+            "5", "admin", "menu_admin"
+        }
+        if state not in admin_states and not entering_admin:
+            activity_teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+            if activity_teacher:
+                self.admin_repo.record_teacher_activity(
+                    teacher=activity_teacher,
+                    whatsapp_number=whatsapp_number,
+                )
+
         # A greeting is a global home command. This prevents values such as
         # "Hi"/"Hello"/"Namaste" from being accidentally stored as a profile
         # field, page choice, lesson name, feedback answer, etc.
@@ -597,6 +621,10 @@ class ConversationService:
             ConversationState.SHARE_LESSON_PHONE: self._handle_share_lesson_phone,
             ConversationState.DELETE_LESSON_CONFIRM: self._handle_delete_lesson_confirm,
             ConversationState.FEEDBACK_QUESTION: self._handle_feedback_question,
+            ConversationState.ADMIN_PASSWORD: self._handle_admin_password,
+            ConversationState.ADMIN_MENU: self._handle_admin_menu,
+            ConversationState.ADMIN_SELECT_TEACHER: self._handle_admin_select_teacher,
+            ConversationState.ADMIN_SELECT_WEEK: self._handle_admin_select_week,
         }
 
         result = handler_map[state](session, whatsapp_number, text)
@@ -841,8 +869,8 @@ class ConversationService:
         )
 
     def _main_menu_outbound(self, language: str) -> dict:
-        # WhatsApp reply-button messages support at most 3 buttons. The main menu
-        # now has 4 choices, so use a list message to keep every option tappable.
+        # WhatsApp reply-button messages support at most 3 buttons, so use a list
+        # message to keep every top-level option tappable.
         return {
             "type": "list",
             "header": self._text(language, "main_header"),
@@ -855,6 +883,7 @@ class ConversationService:
                 {"id": "menu_all_lessons", "title": self._text(language, "btn_all_lessons")},
                 {"id": "menu_my_profile", "title": self._text(language, "btn_profile")},
                 {"id": "menu_feedback", "title": self._text(language, "btn_feedback")},
+                {"id": "menu_admin", "title": self._text(language, "btn_admin")},
             ],
         }
 
@@ -1890,7 +1919,7 @@ class ConversationService:
 
     def _feedback_survey_or_none(self, language: str):
         try:
-            return self.feedback_survey_service.load()
+            return self.feedback_survey_service.load(language)
         except Exception as exc:  # pragma: no cover - defensive configuration handling.
             log_event(logger, "feedback_survey_unavailable", error=str(exc))
             return None
@@ -2083,6 +2112,299 @@ class ConversationService:
             language=language,
         )
 
+    def _admin_menu_outbound(self) -> dict:
+        return {
+            "type": "list",
+            "header": "ADMIN",
+            "body": "Choose an ADMIN option.",
+            "button_text": "ADMIN Menu",
+            "section_title": "ADMIN",
+            "footer": "Teacher Helper reporting",
+            "rows": [
+                {"id": "admin_usage", "title": "Teacher Usage"},
+                {"id": "admin_feedback", "title": "Teacher Feedback"},
+                {"id": "admin_exit", "title": "Exit"},
+            ],
+        }
+
+    def _admin_menu_reply(self, prefix: str = "ADMIN") -> ConversationReply:
+        return self._reply(prefix, ConversationState.ADMIN_MENU, outbound=self._admin_menu_outbound())
+
+    def _admin_allowed_teachers(self) -> list:
+        return self.teacher_repo.list_by_whatsapp_numbers(
+            self.settings.admin_teacher_whatsapp_numbers_list
+        )
+
+    def _admin_teacher_is_allowed(self, teacher) -> bool:
+        if not teacher:
+            return False
+        allowed_ids = {item.id for item in self._admin_allowed_teachers()}
+        return teacher.id in allowed_ids
+
+    def _admin_teacher_list_reply(self, *, report_type: str, page: int = 0) -> ConversationReply:
+        configured_numbers = self.settings.admin_teacher_whatsapp_numbers_list
+        if not configured_numbers:
+            return self._admin_menu_reply(
+                "No ADMIN teachers are configured. Set ADMIN_TEACHERS in the environment."
+            )
+
+        teachers = self._admin_allowed_teachers()
+        if not teachers:
+            return self._admin_menu_reply(
+                "None of the ADMIN_TEACHERS numbers matched teacher_profile records."
+            )
+
+        page_size = 7
+        total_pages = max(1, (len(teachers) + page_size - 1) // page_size)
+        page = max(0, min(page, total_pages - 1))
+        start = page * page_size
+        selected = teachers[start:start + page_size]
+
+        rows: list[dict[str, str]] = []
+        for teacher in selected:
+            details = " | ".join(
+                item for item in [
+                    (getattr(teacher, "school_name", None) or "").strip(),
+                    f"Class {teacher.default_grade}" if teacher.default_grade else "",
+                    teacher.default_subject or "",
+                ]
+                if item
+            )
+            rows.append(
+                {
+                    "id": f"admin_teacher:{teacher.id}",
+                    "title": teacher.teacher_name[:24],
+                    "description": details[:72],
+                }
+            )
+
+        if page > 0:
+            rows.append({"id": f"admin_teacher_page:{page - 1}", "title": "Previous Teachers"})
+        if page + 1 < total_pages:
+            rows.append({"id": f"admin_teacher_page:{page + 1}", "title": "Next Teachers"})
+        rows.append({"id": "admin_exit", "title": "Exit"})
+
+        title = "Teacher Usage" if report_type == "usage" else "Teacher Feedback"
+        return self._reply(
+            f"{title}: select Teacher by Name.",
+            ConversationState.ADMIN_SELECT_TEACHER,
+            outbound={
+                "type": "list",
+                "header": "ADMIN",
+                "body": f"Select Teacher by Name. Page {page + 1}/{total_pages}",
+                "button_text": "Teachers",
+                "section_title": "Teachers",
+                "footer": title,
+                "rows": rows,
+            },
+        )
+
+    def _admin_current_week_start(self) -> date:
+        zone = self.admin_repo.report_zone(self.settings.admin_report_timezone)
+        today = datetime.now(zone).date()
+        # datetime.weekday(): Monday=0 ... Sunday=6.
+        days_since_sunday = (today.weekday() + 1) % 7
+        return today - timedelta(days=days_since_sunday)
+
+    def _admin_allowed_week_starts(self) -> list[date]:
+        current_sunday = self._admin_current_week_start()
+        return [current_sunday - timedelta(days=7 * offset) for offset in range(4)]
+
+    @staticmethod
+    def _admin_week_label(week_start: date) -> str:
+        week_end = week_start + timedelta(days=6)
+        return f"{week_start.strftime('%b %d')} - {week_end.strftime('%b %d')}"
+
+    def _admin_week_reply(self, *, report_type: str, teacher) -> ConversationReply:
+        rows = [
+            {
+                "id": f"admin_week:{week_start.isoformat()}",
+                "title": self._admin_week_label(week_start)[:24],
+                "description": f"Sunday {week_start.strftime('%b %d, %Y')}",
+            }
+            for week_start in self._admin_allowed_week_starts()
+        ]
+        rows.append({"id": "admin_back", "title": "Back to ADMIN"})
+        rows.append({"id": "admin_exit", "title": "Exit"})
+        title = "Usage" if report_type == "usage" else "Feedback"
+        return self._reply(
+            f"{teacher.teacher_name}: select Week by Date.",
+            ConversationState.ADMIN_SELECT_WEEK,
+            outbound={
+                "type": "list",
+                "header": "ADMIN",
+                "body": f"{title} for {teacher.teacher_name}: choose one of the last 4 weeks.",
+                "button_text": "Weeks",
+                "section_title": "Weeks (Sunday start)",
+                "footer": "4 weeks only",
+                "rows": rows,
+            },
+        )
+
+    def _admin_usage_report(self, *, teacher, week_start: date) -> str:
+        daily = self.admin_repo.daily_usage_minutes(
+            teacher_id=teacher.id,
+            week_start=week_start,
+            timezone_name=self.settings.admin_report_timezone,
+            session_timeout_minutes=self.settings.session_timeout_minutes,
+        )
+        week_end = week_start + timedelta(days=6)
+        lines = [
+            f"Teacher Usage: {teacher.teacher_name}",
+            f"Week: {week_start.strftime('%b %d, %Y')} - {week_end.strftime('%b %d, %Y')}",
+            "",
+        ]
+        first_activity_at = self.admin_repo.first_activity_at()
+        tracking_start_date = None
+        if first_activity_at is not None:
+            zone = self.admin_repo.report_zone(self.settings.admin_report_timezone)
+            tracking_start_date = first_activity_at.replace(tzinfo=timezone.utc).astimezone(zone).date()
+
+        has_untracked_days = False
+        for offset in range(7):
+            day = week_start + timedelta(days=offset)
+            if tracking_start_date is None or day < tracking_start_date:
+                lines.append(f"{day.strftime('%A %b %d')}: Not tracked")
+                has_untracked_days = True
+                continue
+
+            minutes = daily.get(day, 0)
+            unit = "minute" if minutes == 1 else "minutes"
+            lines.append(f"{day.strftime('%A %b %d')}: {minutes} {unit}")
+
+        if has_untracked_days:
+            lines.extend(["", "Not tracked = before usage tracking/backfill began."])
+        return "\n".join(lines)
+
+    def _admin_feedback_report(self, *, teacher, week_start: date) -> str:
+        start_utc, end_utc = self.admin_repo.utc_bounds_for_week(
+            week_start=week_start,
+            timezone_name=self.settings.admin_report_timezone,
+        )
+        answers = self.feedback_repo.list_answer_texts(
+            teacher_id=teacher.id,
+            start_utc=start_utc,
+            end_utc=end_utc,
+        )
+        week_end = week_start + timedelta(days=6)
+        header = (
+            f"Teacher Feedback: {teacher.teacher_name}\n"
+            f"Week: {week_start.strftime('%b %d, %Y')} - {week_end.strftime('%b %d, %Y')}\n\n"
+        )
+        if not answers:
+            return header + "No feedback found for this week."
+        # Requirement: answer only, one answer per line. Do not include questions.
+        return header + "\n".join(answers)
+
+    def _handle_admin_password(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        entered = (text or "").strip()
+        expected = (self.settings.admin_password or "").strip()
+        if not expected:
+            return self._reply(
+                "ADMIN password is not configured. Set ADMIN_PASSWORD in the environment.",
+                ConversationState.ADMIN_PASSWORD,
+            )
+        if hmac.compare_digest(entered, expected):
+            session.current_state = ConversationState.ADMIN_MENU.value
+            session.temp_admin_report_type = None
+            session.temp_admin_teacher_id = None
+            self.session_repo.save(session)
+            return self._admin_menu_reply("ADMIN login successful.")
+        return self._reply("Incorrect ADMIN password. Enter the 4-digit password.", ConversationState.ADMIN_PASSWORD)
+
+    def _handle_admin_menu(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        choice = normalize_choice(text)
+        if choice in {"1", "usage", "teacher usage", "admin_usage"}:
+            session.temp_admin_report_type = "usage"
+            session.temp_admin_teacher_id = None
+            session.current_state = ConversationState.ADMIN_SELECT_TEACHER.value
+            self.session_repo.save(session)
+            return self._admin_teacher_list_reply(report_type="usage")
+        if choice in {"2", "feedback", "teacher feedback", "admin_feedback"}:
+            session.temp_admin_report_type = "feedback"
+            session.temp_admin_teacher_id = None
+            session.current_state = ConversationState.ADMIN_SELECT_TEACHER.value
+            self.session_repo.save(session)
+            return self._admin_teacher_list_reply(report_type="feedback")
+        if choice in {"3", "exit", "admin_exit"}:
+            teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+            language = self._teacher_language(teacher, whatsapp_number)
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply("Exited ADMIN.", language)
+        return self._admin_menu_reply("Choose Teacher Usage, Teacher Feedback, or Exit.")
+
+    def _handle_admin_select_teacher(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        choice = normalize_choice(text)
+        report_type = session.temp_admin_report_type or "usage"
+
+        if choice == "admin_exit" or choice == "exit":
+            teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+            language = self._teacher_language(teacher, whatsapp_number)
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply("Exited ADMIN.", language)
+        if choice == "admin_back":
+            session.current_state = ConversationState.ADMIN_MENU.value
+            self.session_repo.save(session)
+            return self._admin_menu_reply()
+        if choice.startswith("admin_teacher_page:"):
+            try:
+                page = int(choice.split(":", 1)[1])
+            except ValueError:
+                page = 0
+            return self._admin_teacher_list_reply(report_type=report_type, page=page)
+        if choice.startswith("admin_teacher:"):
+            try:
+                teacher_id = int(choice.split(":", 1)[1])
+            except ValueError:
+                teacher_id = 0
+            selected_teacher = self.teacher_repo.get_by_id(teacher_id)
+            if self._admin_teacher_is_allowed(selected_teacher):
+                session.temp_admin_teacher_id = selected_teacher.id
+                session.current_state = ConversationState.ADMIN_SELECT_WEEK.value
+                self.session_repo.save(session)
+                return self._admin_week_reply(report_type=report_type, teacher=selected_teacher)
+
+        return self._admin_teacher_list_reply(report_type=report_type)
+
+    def _handle_admin_select_week(self, session, whatsapp_number: str, text: str) -> ConversationReply:
+        choice = normalize_choice(text)
+        if choice in {"admin_back", "back"}:
+            session.current_state = ConversationState.ADMIN_MENU.value
+            session.temp_admin_report_type = None
+            session.temp_admin_teacher_id = None
+            self.session_repo.save(session)
+            return self._admin_menu_reply()
+        if choice in {"admin_exit", "exit"}:
+            teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
+            language = self._teacher_language(teacher, whatsapp_number)
+            self.session_repo.reset_for_main_menu(session)
+            return self._main_menu_reply("Exited ADMIN.", language)
+
+        teacher = self.teacher_repo.get_by_id(session.temp_admin_teacher_id or 0)
+        report_type = session.temp_admin_report_type or "usage"
+        if not self._admin_teacher_is_allowed(teacher):
+            session.current_state = ConversationState.ADMIN_MENU.value
+            self.session_repo.save(session)
+            return self._admin_menu_reply("Selected teacher was not found.")
+
+        if choice.startswith("admin_week:"):
+            try:
+                week_start = date.fromisoformat(choice.split(":", 1)[1])
+            except ValueError:
+                week_start = None
+            if week_start in self._admin_allowed_week_starts():
+                if report_type == "feedback":
+                    report = self._admin_feedback_report(teacher=teacher, week_start=week_start)
+                else:
+                    report = self._admin_usage_report(teacher=teacher, week_start=week_start)
+                session.current_state = ConversationState.ADMIN_MENU.value
+                session.temp_admin_report_type = None
+                session.temp_admin_teacher_id = None
+                self.session_repo.save(session)
+                return self._reply(report, ConversationState.ADMIN_MENU, outbound=self._admin_menu_outbound())
+
+        return self._admin_week_reply(report_type=report_type, teacher=teacher)
+
     def _handle_main_menu(self, session, whatsapp_number: str, text: str) -> ConversationReply:
         teacher = self.teacher_repo.get_by_whatsapp_number(whatsapp_number)
         language = self._teacher_language(teacher, whatsapp_number)
@@ -2145,6 +2467,13 @@ class ConversationService:
                 self.session_repo.clear_temp_profile(session)
                 return self._reply(self._text(language, "new_lesson_without_profile"), ConversationState.PROFILE_NAME)
             return self._start_feedback(session, teacher, whatsapp_number, language)
+
+        if choice in {"5", "admin", "menu_admin"}:
+            session.current_state = ConversationState.ADMIN_PASSWORD.value
+            session.temp_admin_report_type = None
+            session.temp_admin_teacher_id = None
+            self.session_repo.save(session)
+            return self._reply("Enter ADMIN 4-digit password.", ConversationState.ADMIN_PASSWORD)
 
         return self._main_menu_reply(self._text(language, "main_menu_unknown"), language)
 

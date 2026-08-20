@@ -1,0 +1,89 @@
+{
+  "survey_id": "weekly_lesson_plan_feedback",
+  "version": 1,
+  "title": "साप्ताहिक Lesson Plan फीडबैक",
+  "description": "कृपया इस सप्ताह के Lesson Plans के बारे में नीचे दिए गए प्रश्नों के उत्तर दें।",
+  "choice_answer_format": "हाँ / कभी-कभी / नहीं",
+  "choice_options": [
+    {"id": "yes", "label": "हाँ"},
+    {"id": "sometimes", "label": "कभी-कभी"},
+    {"id": "no", "label": "नहीं"}
+  ],
+  "parts": [
+    {
+      "id": "part_a",
+      "title": "भाग A – छोटे प्रश्न",
+      "questions": [
+        {
+          "id": "q1",
+          "number": 1,
+          "type": "choice",
+          "text": "क्या आपने इस सप्ताह ज़्यादातर स्कूल के दिनों में 20-मिनट का Lesson Plan Review पूरा किया?",
+          "required": true
+        },
+        {
+          "id": "q2",
+          "number": 2,
+          "type": "choice",
+          "text": "क्या Lesson Plan ने आपकी Class की तैयारी बेहतर करने में मदद की?",
+          "required": true
+        },
+        {
+          "id": "q3",
+          "number": 3,
+          "type": "choice",
+          "text": "क्या उस दिन के Lesson के लिए Lesson Plan सही था?",
+          "required": true
+        },
+        {
+          "id": "q4",
+          "number": 4,
+          "type": "choice",
+          "text": "क्या Lesson Plan से आपकी तैयारी का समय बचा?",
+          "required": true
+        },
+        {
+          "id": "q5",
+          "number": 5,
+          "type": "choice",
+          "text": "क्या Lesson Plan समझना आसान था?",
+          "required": true
+        },
+        {
+          "id": "q6",
+          "number": 6,
+          "type": "choice",
+          "text": "क्या आपने Class में सुझाई गई ज़्यादातर Activities या Questions का उपयोग किया?",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "part_b",
+      "title": "भाग B – छोटे उत्तर",
+      "questions": [
+        {
+          "id": "q7",
+          "number": 7,
+          "type": "text",
+          "text": "इस सप्ताह के Lesson Plans का सबसे उपयोगी हिस्सा क्या था?",
+          "required": true
+        },
+        {
+          "id": "q8",
+          "number": 8,
+          "type": "text",
+          "text": "Lesson Plans का उपयोग करते समय आपको सबसे बड़ी समस्या क्या हुई?",
+          "required": true
+        },
+        {
+          "id": "q9",
+          "number": 9,
+          "type": "text",
+          "text": "अगर आप एक चीज़ बदल सकते, तो वह क्या होती?",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

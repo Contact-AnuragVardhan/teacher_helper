@@ -40,3 +40,8 @@ class TeacherProfile(Base):
         back_populates="teacher",
         cascade="all, delete-orphan",
     )
+    chat_activities = relationship(
+        "TeacherChatActivity",
+        back_populates="teacher",
+        cascade="all, delete-orphan",
+    )
