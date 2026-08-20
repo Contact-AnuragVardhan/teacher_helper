@@ -77,3 +77,34 @@ class FeedbackRepository:
             answered_count=len(answer_rows),
         )
         return submission
+
+    def list_answer_texts(
+        self,
+        *,
+        teacher_id: int,
+        start_utc: datetime,
+        end_utc: datetime,
+    ) -> list[str]:
+        submissions = (
+            self.db.query(FeedbackSubmission)
+            .filter(
+                FeedbackSubmission.teacher_id == teacher_id,
+                FeedbackSubmission.submitted_at >= start_utc,
+                FeedbackSubmission.submitted_at < end_utc,
+            )
+            .order_by(FeedbackSubmission.submitted_at.asc(), FeedbackSubmission.id.asc())
+            .all()
+        )
+
+        answers: list[str] = []
+        for submission in submissions:
+            try:
+                payload = json.loads(submission.answers_json or "{}")
+            except json.JSONDecodeError:
+                continue
+            for item in payload.get("answers", []):
+                answer = str((item or {}).get("answer") or "").strip()
+                if answer:
+                    answers.append(answer)
+        return answers
+

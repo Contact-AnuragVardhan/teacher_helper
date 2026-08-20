@@ -47,6 +47,8 @@ class SessionState(Base):
     temp_feedback_survey_key: Mapped[str | None] = mapped_column(String(140), nullable=True)
     temp_feedback_question_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     temp_feedback_answers_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    temp_admin_report_type: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    temp_admin_teacher_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=datetime.utcnow,

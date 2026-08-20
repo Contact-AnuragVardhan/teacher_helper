@@ -41,6 +41,8 @@ _RUNTIME_COLUMNS: dict[str, dict[str, str]] = {
         "temp_feedback_survey_key": "VARCHAR(140)",
         "temp_feedback_question_index": "INTEGER",
         "temp_feedback_answers_json": "TEXT",
+        "temp_admin_report_type": "VARCHAR(30)",
+        "temp_admin_teacher_id": "INTEGER",
     },
     "lesson_plan": {
         "document_id": "VARCHAR(80)",

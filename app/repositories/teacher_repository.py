@@ -21,6 +21,27 @@ class TeacherRepository:
         digits = self._digits_only(phone_number)
         return f"+{digits}" if digits else ""
 
+    def list_all(self) -> list[TeacherProfile]:
+        return (
+            self.db.query(TeacherProfile)
+            .order_by(TeacherProfile.teacher_name.asc(), TeacherProfile.id.asc())
+            .all()
+        )
+
+    def list_by_whatsapp_numbers(self, whatsapp_numbers: list[str]) -> list[TeacherProfile]:
+        """Return only configured teachers, preserving the ADMIN_TEACHERS order."""
+        result: list[TeacherProfile] = []
+        seen_ids: set[int] = set()
+        for whatsapp_number in whatsapp_numbers:
+            teacher = self.get_by_whatsapp_number(whatsapp_number)
+            if teacher and teacher.id not in seen_ids:
+                seen_ids.add(teacher.id)
+                result.append(teacher)
+        return result
+
+    def get_by_id(self, teacher_id: int) -> TeacherProfile | None:
+        return self.db.query(TeacherProfile).filter(TeacherProfile.id == teacher_id).first()
+
     def get_by_whatsapp_number(self, whatsapp_number: str) -> TeacherProfile | None:
         canonical_number = self._canonical_whatsapp_number(whatsapp_number)
         digits_only = self._digits_only(whatsapp_number)

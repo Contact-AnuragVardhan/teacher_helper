@@ -1,0 +1,89 @@
+{
+  "survey_id": "weekly_lesson_plan_feedback",
+  "version": 1,
+  "title": "Weekly Lesson Plan Feedback",
+  "description": "Please is hafte ke Lesson Plans ke baare mein neeche diye gaye questions ka answer dein.",
+  "choice_answer_format": "Haan / Kabhi-kabhi / Nahi",
+  "choice_options": [
+    {"id": "yes", "label": "Haan"},
+    {"id": "sometimes", "label": "Kabhi-kabhi"},
+    {"id": "no", "label": "Nahi"}
+  ],
+  "parts": [
+    {
+      "id": "part_a",
+      "title": "Part A – Quick Questions",
+      "questions": [
+        {
+          "id": "q1",
+          "number": 1,
+          "type": "choice",
+          "text": "Kya aapne is hafte zyadaatar school days par 20-minute ka Lesson Plan Review poora kiya?",
+          "required": true
+        },
+        {
+          "id": "q2",
+          "number": 2,
+          "type": "choice",
+          "text": "Kya Lesson Plan ne aapki Class ki taiyari behtar karne mein madad ki?",
+          "required": true
+        },
+        {
+          "id": "q3",
+          "number": 3,
+          "type": "choice",
+          "text": "Kya us din ke Lesson ke liye Lesson Plan sahi tha?",
+          "required": true
+        },
+        {
+          "id": "q4",
+          "number": 4,
+          "type": "choice",
+          "text": "Kya Lesson Plan se aapki taiyari ka samay bacha?",
+          "required": true
+        },
+        {
+          "id": "q5",
+          "number": 5,
+          "type": "choice",
+          "text": "Kya Lesson Plan samajhna aasan tha?",
+          "required": true
+        },
+        {
+          "id": "q6",
+          "number": 6,
+          "type": "choice",
+          "text": "Kya aapne Class mein suggest ki gayi zyadaatar Activities ya Questions ka use kiya?",
+          "required": true
+        }
+      ]
+    },
+    {
+      "id": "part_b",
+      "title": "Part B – Short Answers",
+      "questions": [
+        {
+          "id": "q7",
+          "number": 7,
+          "type": "text",
+          "text": "Is hafte ke Lesson Plans ka sabse useful hissa kya tha?",
+          "required": true
+        },
+        {
+          "id": "q8",
+          "number": 8,
+          "type": "text",
+          "text": "Lesson Plans ka use karte samay aapko sabse badi problem kya hui?",
+          "required": true
+        },
+        {
+          "id": "q9",
+          "number": 9,
+          "type": "text",
+          "text": "Agar aap EK cheez badal sakte, to woh kya hoti?",
+          "required": true
+        }
+      ]
+    }
+  ]
+}

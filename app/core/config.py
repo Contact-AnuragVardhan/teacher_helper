@@ -30,6 +30,18 @@ class Settings(BaseSettings):
         default=30,
         validation_alias=AliasChoices("session_timeout_minutes", "SESSION_TIMEOUT_MINUTES"),
     )
+    admin_password: str = Field(
+        default="",
+        validation_alias=AliasChoices("admin_password", "ADMIN_PASSWORD"),
+    )
+    admin_teachers: str = Field(
+        default="",
+        validation_alias=AliasChoices("admin_teachers", "ADMIN_TEACHERS"),
+    )
+    admin_report_timezone: str = Field(
+        default="Asia/Kolkata",
+        validation_alias=AliasChoices("admin_report_timezone", "ADMIN_REPORT_TIMEZONE"),
+    )
     supported_languages: str = Field(
         default="English,Hindi,Hinglish",
         validation_alias=AliasChoices("supported_languages", "SUPPORTED_LANGUAGES"),
@@ -145,6 +157,14 @@ class Settings(BaseSettings):
             raise ValueError("SESSION_TIMEOUT_MINUTES must be greater than 0.")
         return value
 
+    @field_validator("admin_password")
+    @classmethod
+    def validate_admin_password(cls, value: str) -> str:
+        value = (value or "").strip()
+        if value and (len(value) != 4 or not value.isdigit()):
+            raise ValueError("ADMIN_PASSWORD must be exactly 4 digits when configured.")
+        return value
+
     @field_validator("whatsapp_graph_version")
     @classmethod
     def validate_graph_version(cls, value: str) -> str:
@@ -175,6 +195,23 @@ class Settings(BaseSettings):
     @property
     def database_is_sqlite(self) -> bool:
         return self.database_url.startswith("sqlite")
+
+    @property
+    def admin_teacher_whatsapp_numbers_list(self) -> list[str]:
+        """Configured ADMIN report teachers, identified by WhatsApp number.
+
+        Names/grade/subject/school are deliberately read from teacher_profile so
+        ADMIN_TEACHERS stays short and does not duplicate profile data.
+        """
+        result: list[str] = []
+        seen: set[str] = set()
+        for item in self.admin_teachers.split(","):
+            digits = "".join(ch for ch in item if ch.isdigit())
+            canonical = f"+{digits}" if digits else ""
+            if canonical and canonical not in seen:
+                seen.add(canonical)
+                result.append(canonical)
+        return result
 
     @property
     def supported_languages_list(self) -> list[str]:

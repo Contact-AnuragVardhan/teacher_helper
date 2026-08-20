@@ -16,6 +16,8 @@ The current WhatsApp menu flow is:
 - `1 → New Lesson`
 - `2 → All Lessons`
 - `3 → My Profile`
+- `4 → Feedback`
+- `5 → ADMIN`
 
 ## Features
 
@@ -54,6 +56,9 @@ Minimal variables:
 - `LLM_PROVIDER`
 - `DUPLICATE_LESSON_POLICY`
 - `SESSION_TIMEOUT_MINUTES`
+- `ADMIN_PASSWORD` (exactly 4 digits)
+- `ADMIN_TEACHERS` (comma-separated WhatsApp numbers allowed in ADMIN reports)
+- `ADMIN_REPORT_TIMEZONE` (defaults to `Asia/Kolkata`)
 
 Useful optional variables:
 
@@ -73,6 +78,9 @@ DATABASE_URL="sqlite:///./teacher_helper.db"
 LLM_PROVIDER="deterministic"
 DUPLICATE_LESSON_POLICY="reject"
 SESSION_TIMEOUT_MINUTES="30"
+ADMIN_PASSWORD="9876"
+ADMIN_TEACHERS="+916291687879,+919009653018,+919691437223"
+ADMIN_REPORT_TIMEZONE="Asia/Kolkata"
 SUPPORTED_LANGUAGES="English,Hindi,Hinglish"
 RESET_DB_ON_START=false
 ```
@@ -86,6 +94,9 @@ OPENAI_API_KEY="your_api_key"
 OPENAI_MODEL="gpt-4o-mini"
 DUPLICATE_LESSON_POLICY="overwrite"
 SESSION_TIMEOUT_MINUTES="45"
+ADMIN_PASSWORD="9876"
+ADMIN_TEACHERS="+916291687879,+919009653018,+919691437223"
+ADMIN_REPORT_TIMEZONE="Asia/Kolkata"
 SUPPORTED_LANGUAGES="English,Hindi,Hinglish"
 RESET_DB_ON_START=false
 ```
@@ -119,6 +130,30 @@ Use this to keep existing data and only create missing tables:
 ```env
 RESET_DB_ON_START=false
 ```
+
+## ADMIN usage and feedback reporting
+
+The top-level WhatsApp menu includes `ADMIN`. The password is read only from `ADMIN_PASSWORD`. Teacher choices are restricted to the WhatsApp numbers in `ADMIN_TEACHERS`; names and other display details are read from the existing `teacher_profile` rows. Then choose:
+
+1. **Teacher Usage** — select a teacher by name, then one of exactly four Sunday-start weeks: the current week plus the previous three. The report shows Sunday through Saturday with total tracked chat minutes for each day. Chat sessions are separated using `SESSION_TIMEOUT_MINUTES`; a one-message session counts as one minute.
+2. **Teacher Feedback** — select a teacher and one of the same four weeks. The report shows saved feedback answers only, one answer per line, without repeating the survey questions.
+3. **Exit** — returns to the normal Teacher Helper main menu.
+
+Usage timestamps are stored in `teacher_chat_activity`; message text is not stored for usage reporting. Existing feedback continues to use `feedback_submission`. Days older than the first tracked/backfilled activity are displayed as `Not tracked`, not as a false zero.
+
+The old `session_state` cannot reconstruct historical chat duration because it stores only the latest session update. If hosting/application logs were retained, backfill the new table from `conversation_inbound` log events. For the current week of August 16-22, 2026, for example:
+
+```bash
+python scripts/backfill_teacher_chat_activity_from_logs.py \
+  --log-file render-teacher-helper.log \
+  --from-date 2026-08-16 \
+  --to-date 2026-08-22 \
+  --dry-run
+
+# If the count looks correct, rerun without --dry-run.
+```
+
+The backfill ignores teachers not present in `ADMIN_TEACHERS` and avoids exact timestamp duplicates. The retained log lines must contain a timestamp (for example the Render timestamp prefix).
 
 ## NCERT ingestion
 
